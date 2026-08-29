@@ -1,0 +1,17 @@
+# Solo project config. Command processes defined here are synced into
+# Solo and must be trusted in the Solo UI before they can run.
+# Reference: solo help(topic="solo.yml")
+name: KanBan Board
+icon_initials: KB
+
+# No runnable commands yet: the repo is empty. Add processes as the
+# project takes shape, for example:
+#
+#   Dev server:
+#     command: go run ./cmd/server
+#     auto_start: true
+#     auto_restart: false
+#     restart_when_changed:
+#       - "**/*.go"
+#       - go.mod
+processes: {}
