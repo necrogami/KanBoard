@@ -181,26 +181,30 @@ func (c MoveCard) Validate() error {
 		return err
 	}
 	set := 0
+	last := ""
 	if c.AfterKey != "" {
 		set++
+		last = "after_key"
 		if _, _, err := keys.ParseCard(c.AfterKey); err != nil {
 			return invalid("after_key", err.Error())
 		}
 	}
 	if c.BeforeKey != "" {
 		set++
+		last = "before_key"
 		if _, _, err := keys.ParseCard(c.BeforeKey); err != nil {
 			return invalid("before_key", err.Error())
 		}
 	}
 	if c.Position != "" {
 		set++
+		last = "position"
 		if c.Position != PositionTop && c.Position != PositionBottom {
 			return invalid("position", "top or bottom")
 		}
 	}
 	if set > 1 {
-		return invalid("after_key", "give only one of after_key, before_key, position")
+		return invalid(last, "give only one of after_key, before_key, position")
 	}
 	return nil
 }
