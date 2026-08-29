@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"strings"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -63,7 +64,7 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	memory := strings.Contains(dsn, "mode=memory")
+	memory := isMemoryDSN(dsn)
 	if memory {
 		db.SetMaxOpenConns(1)
 	} else {
@@ -84,11 +85,22 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("%w: %s", ErrIntegrity, check)
 	}
-	st := &Store{DB: db, Dialect: SQLite}
-	if !memory {
-		st.path = sqlitePath(dsn)
-	}
+	st := &Store{DB: db, Dialect: SQLite, path: sqlitePath(dsn)}
 	return st, nil
+}
+
+// isMemoryDSN reports whether dsn refers to an in-memory SQLite database,
+// in any of the forms sqlite accepts: a bare ":memory:", a "file::memory:"
+// URI (with or without a query string), or a "mode=memory" query
+// parameter on a named DSN.
+func isMemoryDSN(dsn string) bool {
+	if dsn == ":memory:" {
+		return true
+	}
+	if strings.HasPrefix(dsn, "file::memory:") {
+		return true
+	}
+	return strings.Contains(dsn, "mode=memory")
 }
 
 func sqliteDSN(dsn string) string {
@@ -102,8 +114,12 @@ func sqliteDSN(dsn string) string {
 	return dsn + sep + "_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=journal_size_limit(67108864)&_txlock=immediate"
 }
 
-// sqlitePath extracts the file path from a plain path or file: URI.
+// sqlitePath extracts the file path from a plain path or file: URI. It
+// returns "" for a memory DSN, which has no backing file.
 func sqlitePath(dsn string) string {
+	if isMemoryDSN(dsn) {
+		return ""
+	}
 	dsn = strings.TrimPrefix(dsn, "file:")
 	if i := strings.IndexByte(dsn, '?'); i >= 0 {
 		dsn = dsn[:i]
@@ -172,6 +188,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 	}
 	if current > 0 && current < latest && s.path != "" {
 		dest := fmt.Sprintf("%s.pre-migrate-%d.bak", s.path, current)
+		if err := os.Remove(dest); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("store: remove stale backup: %w", err)
+		}
 		if err := s.Backup(ctx, dest); err != nil {
 			return err
 		}

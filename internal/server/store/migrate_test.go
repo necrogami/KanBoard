@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -73,6 +75,53 @@ func TestOpenFileDatabaseEnforcesPragmas(t *testing.T) {
 	if err := st.DB.QueryRowContext(ctx, "PRAGMA journal_size_limit").Scan(&limit); err != nil || limit != 67108864 {
 		t.Fatalf("journal_size_limit = %d, %v", limit, err)
 	}
+	var busy int
+	if err := st.DB.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&busy); err != nil || busy != 5000 {
+		t.Fatalf("busy_timeout = %d, %v", busy, err)
+	}
+}
+
+func TestOpenRecognisesColonMemoryDSN(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.DB.ExecContext(ctx, "CREATE TABLE t (x INTEGER)"); err != nil {
+		t.Fatal("create:", err)
+	}
+
+	const n = 8
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if _, err := st.DB.ExecContext(ctx, "INSERT INTO t (x) VALUES (1)"); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("insert on :memory: db landed on a separate connection: %v", err)
+	}
+
+	var cnt int
+	if err := st.DB.QueryRowContext(ctx, "SELECT count(*) FROM t").Scan(&cnt); err != nil || cnt != n {
+		t.Fatalf("count = %d, %v, want %d", cnt, err, n)
+	}
+
+	dest := filepath.Join(t.TempDir(), "kb.bak")
+	if err := st.Backup(ctx, dest); !errors.Is(err, store.ErrNoBackup) {
+		t.Fatalf(":memory: backup err = %v", err)
+	}
 }
 
 func TestBackupSQLiteFile(t *testing.T) {
@@ -105,5 +154,28 @@ func TestBackupRefusedForMemoryAndPostgres(t *testing.T) {
 	st := openSQLite(t)
 	if err := st.Backup(context.Background(), "x"); !errors.Is(err, store.ErrNoBackup) {
 		t.Fatalf("memory backup err = %v", err)
+	}
+}
+
+func TestBackupSucceedsAfterRemovingStaleBackup(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	st, err := store.Open(ctx, filepath.Join(dir, "kb.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(dir, "kb.pre-migrate-1.bak")
+	if err := st.Backup(ctx, dest); err != nil {
+		t.Fatal("first backup:", err)
+	}
+	if err := os.Remove(dest); err != nil {
+		t.Fatal("remove stale backup:", err)
+	}
+	if err := st.Backup(ctx, dest); err != nil {
+		t.Fatal("second backup after removing stale file:", err)
 	}
 }
