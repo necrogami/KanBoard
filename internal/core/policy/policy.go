@@ -43,6 +43,7 @@ const (
 	CardRestore    Action = "card.restore"
 	CommentAdd     Action = "comment.add"
 	LabelCreate    Action = "label.create"
+	ProjectCreate  Action = "project.create"
 )
 
 // Token describes the API token an agent is acting through. A nil Token
@@ -56,6 +57,7 @@ type Token struct {
 // Actor is who is asking.
 type Actor struct {
 	UserID        string
+	WorkspaceID   string
 	Kind          Kind
 	WorkspaceRole WorkspaceRole
 	ProjectRoles  map[string]ProjectRole
@@ -132,6 +134,7 @@ var knownActions = map[Action]bool{
 	CardRestore:    true,
 	CommentAdd:     true,
 	LabelCreate:    true,
+	ProjectCreate:  true,
 }
 
 // Can reports whether a may perform act on r.
@@ -147,6 +150,9 @@ func Can(a Actor, act Action, r Resource) bool {
 	}
 	if act == WorkspaceAdmin {
 		return false
+	}
+	if act == ProjectCreate {
+		return a.WorkspaceRole != ""
 	}
 	role, ok := a.ProjectRoles[r.ProjectID]
 	if !ok {

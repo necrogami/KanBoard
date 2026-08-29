@@ -55,6 +55,9 @@ func TestCanMatrix(t *testing.T) {
 		{"board restricted token reads project without board", actor(policy.WorkspaceMember, policy.ProjectMember, boardTok), policy.ProjectRead, policy.Resource{ProjectID: "p1"}, true},
 		{"board restricted token blocks write without board", actor(policy.WorkspaceMember, policy.ProjectMember, boardTok), policy.CardCreate, policy.Resource{ProjectID: "p1"}, false},
 		{"unknown action denied", actor(policy.WorkspaceMember, policy.ProjectAdminRole, nil), policy.Action("nope"), res, false},
+		{"member creates project", actor(policy.WorkspaceMember, "", nil), policy.ProjectCreate, policy.Resource{}, true},
+		{"outsider cannot create project", actor("", "", nil), policy.ProjectCreate, policy.Resource{}, false},
+		{"read token cannot create project", actor(policy.WorkspaceMember, "", readTok), policy.ProjectCreate, policy.Resource{}, false},
 	}
 	for _, c := range cases {
 		if got := policy.Can(c.a, c.act, c.res); got != c.want {
