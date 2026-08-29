@@ -33,6 +33,28 @@ func TestNewRejectsUnknownKind(t *testing.T) {
 	}
 }
 
+func TestNewNilPayloadEncodesEmptyObject(t *testing.T) {
+	ev, err := events.New(events.CardArchived, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev.Kind != events.CardArchived {
+		t.Fatalf("kind = %q", ev.Kind)
+	}
+	if ev.Payload != "{}" {
+		t.Fatalf("payload = %q, want {}", ev.Payload)
+	}
+
+	var p *events.CommentPayload
+	ev, err = events.New(events.CardArchived, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev.Payload != "{}" {
+		t.Fatalf("typed nil payload = %q, want {}", ev.Payload)
+	}
+}
+
 // specKinds is the spec 4.3 list for 0.1 minus the kinds owned by later
 // plans (user.deleted, import.*, webhook.*). Adding a kind means adding
 // it here too; the contract is frozen, so this list only grows.

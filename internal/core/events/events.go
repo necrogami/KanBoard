@@ -6,6 +6,7 @@ package events
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"time"
 )
 
@@ -95,6 +96,8 @@ func New(kind Kind, payload any) (Event, error) {
 		return Event{}, fmt.Errorf("events: unknown kind %q", kind)
 	}
 	if payload == nil {
+		payload = struct{}{}
+	} else if v := reflect.ValueOf(payload); v.Kind() == reflect.Pointer && v.IsNil() {
 		payload = struct{}{}
 	}
 	b, err := json.Marshal(payload)
