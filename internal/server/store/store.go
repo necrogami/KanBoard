@@ -1,3 +1,5 @@
+//go:generate go run ./internal/gen
+
 // Package store opens the database, applies migrations and exposes the
 // engine-neutral Querier. SQLite is the default; Postgres is selected by
 // a postgres:// DSN.
@@ -12,10 +14,12 @@ import (
 	"os"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
-	_ "modernc.org/sqlite"
+	sqlite "modernc.org/sqlite"
 
+	"github.com/necrogami/kanboard/internal/server/store/sqlitegen"
 	"github.com/necrogami/kanboard/migrations"
 )
 
@@ -42,6 +46,53 @@ type Store struct {
 	DB      *sql.DB
 	Dialect Dialect
 	path    string // sqlite file path, empty for memory databases and postgres
+	newQ    func(sqlitegen.DBTX) Querier
+}
+
+// Querier is the engine-neutral query interface. The SQLite generated
+// code defines it; pgquerier_gen.go implements it for Postgres.
+type Querier = sqlitegen.Querier
+
+var _ Querier = (*pgQuerier)(nil)
+
+// Q returns a Querier bound to the connection pool (autocommit).
+func (s *Store) Q() Querier { return s.newQ(s.DB) }
+
+// WithTx runs fn inside a transaction, committing on nil and rolling
+// back on error or panic.
+func (s *Store) WithTx(ctx context.Context, fn func(q Querier) error) (err error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			_ = tx.Rollback()
+			panic(p)
+		}
+	}()
+	if err := fn(s.newQ(tx)); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+// IsUniqueViolation reports whether err is a unique-constraint failure
+// on either engine, so the service layer can answer E_CONFLICT.
+func IsUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
+	}
+	var sqErr *sqlite.Error
+	if errors.As(err, &sqErr) {
+		return sqErr.Code() == 2067 // SQLITE_CONSTRAINT_UNIQUE
+	}
+	return false
 }
 
 // Open connects and pings. A DSN starting with postgres:// or
@@ -58,7 +109,7 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 			db.Close()
 			return nil, fmt.Errorf("store: postgres ping: %w", err)
 		}
-		return &Store{DB: db, Dialect: Postgres}, nil
+		return &Store{DB: db, Dialect: Postgres, newQ: func(d sqlitegen.DBTX) Querier { return newPGQuerier(d) }}, nil
 	}
 	db, err := sql.Open("sqlite", sqliteDSN(dsn))
 	if err != nil {
@@ -85,7 +136,7 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("%w: %s", ErrIntegrity, check)
 	}
-	st := &Store{DB: db, Dialect: SQLite, path: sqlitePath(dsn)}
+	st := &Store{DB: db, Dialect: SQLite, path: sqlitePath(dsn), newQ: func(d sqlitegen.DBTX) Querier { return sqlitegen.New(d) }}
 	return st, nil
 }
 
