@@ -23,7 +23,7 @@ func (q *Queries) DeleteReceiptsBefore(ctx context.Context, before int64) (int64
 }
 
 const getReceipt = `-- name: GetReceipt :one
-SELECT workspace_id, idempotency_key, actor_id, result, created_at FROM command_receipt WHERE idempotency_key = ?1 AND actor_id = ?2
+SELECT workspace_id, idempotency_key, actor_id, command_kind, result, created_at FROM command_receipt WHERE idempotency_key = ?1 AND actor_id = ?2
 `
 
 type GetReceiptParams struct {
@@ -38,6 +38,7 @@ func (q *Queries) GetReceipt(ctx context.Context, arg GetReceiptParams) (Command
 		&i.WorkspaceID,
 		&i.IdempotencyKey,
 		&i.ActorID,
+		&i.CommandKind,
 		&i.Result,
 		&i.CreatedAt,
 	)
@@ -45,14 +46,15 @@ func (q *Queries) GetReceipt(ctx context.Context, arg GetReceiptParams) (Command
 }
 
 const insertReceipt = `-- name: InsertReceipt :exec
-INSERT INTO command_receipt (workspace_id, idempotency_key, actor_id, result, created_at)
-VALUES (?1, ?2, ?3, ?4, ?5)
+INSERT INTO command_receipt (workspace_id, idempotency_key, actor_id, command_kind, result, created_at)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6)
 `
 
 type InsertReceiptParams struct {
 	WorkspaceID    sql.NullString
 	IdempotencyKey string
 	ActorID        string
+	CommandKind    string
 	Result         string
 	CreatedAt      int64
 }
@@ -62,6 +64,7 @@ func (q *Queries) InsertReceipt(ctx context.Context, arg InsertReceiptParams) er
 		arg.WorkspaceID,
 		arg.IdempotencyKey,
 		arg.ActorID,
+		arg.CommandKind,
 		arg.Result,
 		arg.CreatedAt,
 	)

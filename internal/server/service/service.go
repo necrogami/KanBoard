@@ -161,8 +161,11 @@ func (t *Tx) appendEvent(ev *events.Event) error {
 
 // run executes one command: receipt replay, body, events, hooks,
 // receipt, commit, publish. out must be a pointer to the JSON-encodable
-// result so a replay can be answered from the receipt.
-func (s *Service) run(ctx context.Context, actor policy.Actor, meta commands.Meta, out any, body func(tx *Tx) error) error {
+// result so a replay can be answered from the receipt. kind is a stable
+// literal naming the command (e.g. "CreateProject"); a stored receipt
+// whose kind differs from kind means the idempotency key was reused for
+// a different command, which is E_CONFLICT rather than a replay.
+func (s *Service) run(ctx context.Context, actor policy.Actor, meta commands.Meta, kind string, out any, body func(tx *Tx) error) error {
 	// One mutation at a time per workspace, held through publish, so seq
 	// order equals publish order. The database already serializes writes
 	// (BEGIN IMMEDIATE on SQLite, the workspace row lock on Postgres);
@@ -177,6 +180,9 @@ func (s *Service) run(ctx context.Context, actor policy.Actor, meta commands.Met
 			r, err := q.GetReceipt(ctx, sqlitegen.GetReceiptParams{IdempotencyKey: meta.IdempotencyKey, ActorID: actor.UserID})
 			switch {
 			case err == nil:
+				if r.CommandKind != kind {
+					return conflict("idempotency key reused for a different command", 0)
+				}
 				return json.Unmarshal([]byte(r.Result), out)
 			case !errors.Is(err, sql.ErrNoRows):
 				return err
@@ -202,7 +208,7 @@ func (s *Service) run(ctx context.Context, actor policy.Actor, meta commands.Met
 			if err != nil {
 				return err
 			}
-			if err := q.InsertReceipt(ctx, sqlitegen.InsertReceiptParams{WorkspaceID: nullStr(actor.WorkspaceID), IdempotencyKey: meta.IdempotencyKey, ActorID: actor.UserID, Result: string(b), CreatedAt: tx.NowMs}); err != nil {
+			if err := q.InsertReceipt(ctx, sqlitegen.InsertReceiptParams{WorkspaceID: nullStr(actor.WorkspaceID), IdempotencyKey: meta.IdempotencyKey, ActorID: actor.UserID, CommandKind: kind, Result: string(b), CreatedAt: tx.NowMs}); err != nil {
 				return err
 			}
 		}

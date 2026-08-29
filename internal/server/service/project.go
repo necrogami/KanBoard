@@ -18,7 +18,7 @@ func (s *Service) CreateWorkspace(ctx context.Context, cmd commands.CreateWorksp
 	}
 	var out Workspace
 	system := policy.Actor{Kind: policy.KindHuman}
-	err := s.run(ctx, system, cmd.Meta, &out, func(tx *Tx) error {
+	err := s.run(ctx, system, cmd.Meta, "CreateWorkspace", &out, func(tx *Tx) error {
 		n, err := tx.Q.CountWorkspaces(tx.ctx)
 		if err != nil {
 			return err
@@ -60,7 +60,7 @@ func (s *Service) CreateProject(ctx context.Context, actor policy.Actor, cmd com
 		return Project{}, validation(err)
 	}
 	var out Project
-	err := s.run(ctx, actor, cmd.Meta, &out, func(tx *Tx) error {
+	err := s.run(ctx, actor, cmd.Meta, "CreateProject", &out, func(tx *Tx) error {
 		if cmd.WorkspaceID != actor.WorkspaceID {
 			return forbidden()
 		}

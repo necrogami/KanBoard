@@ -206,6 +206,7 @@ CREATE TABLE command_receipt (
     workspace_id TEXT,
     idempotency_key TEXT NOT NULL,
     actor_id TEXT NOT NULL,
+    command_kind TEXT NOT NULL,
     result TEXT NOT NULL,
     created_at BIGINT NOT NULL,
     PRIMARY KEY (idempotency_key, actor_id)

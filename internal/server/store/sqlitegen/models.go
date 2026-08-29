@@ -92,6 +92,7 @@ type CommandReceipt struct {
 	WorkspaceID    sql.NullString
 	IdempotencyKey string
 	ActorID        string
+	CommandKind    string
 	Result         string
 	CreatedAt      int64
 }

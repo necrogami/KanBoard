@@ -30,7 +30,7 @@ func TestWorkspaceSeqAndReceipt(t *testing.T) {
 		if !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("GetReceipt on empty = %v", err)
 		}
-		if err := st.Q().InsertReceipt(ctx, sqlitegen.InsertReceiptParams{IdempotencyKey: "k", ActorID: "a", Result: "{}", CreatedAt: 5}); err != nil {
+		if err := st.Q().InsertReceipt(ctx, sqlitegen.InsertReceiptParams{IdempotencyKey: "k", ActorID: "a", CommandKind: "Test", Result: "{}", CreatedAt: 5}); err != nil {
 			t.Fatal(err)
 		}
 		r, err := st.Q().GetReceipt(ctx, sqlitegen.GetReceiptParams{IdempotencyKey: "k", ActorID: "a"})

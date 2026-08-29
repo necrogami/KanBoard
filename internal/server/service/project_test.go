@@ -13,6 +13,7 @@ import (
 	"github.com/necrogami/kanboard/internal/server/bus"
 	"github.com/necrogami/kanboard/internal/server/service"
 	"github.com/necrogami/kanboard/internal/server/store"
+	"github.com/necrogami/kanboard/internal/server/store/sqlitegen"
 	"github.com/necrogami/kanboard/internal/server/store/storetest"
 )
 
@@ -167,6 +168,18 @@ func TestLoadActorPaths(t *testing.T) {
 		}
 		_, err = h.svc.LoadActor(ctx, h.ws.ID, h.ws.AdminUserID, nil)
 		code(t, err, service.CodeForbidden)
+	})
+}
+
+func TestIdempotencyKeyReusedForDifferentCommandConflicts(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st *store.Store) {
+		h := newHarness(t, st)
+		ctx := context.Background()
+		if err := st.Q().InsertReceipt(ctx, sqlitegen.InsertReceiptParams{IdempotencyKey: "reused", ActorID: h.ws.AdminUserID, CommandKind: "Other", Result: "{}", CreatedAt: 1}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := h.svc.CreateProject(ctx, h.admin, commands.CreateProject{Meta: commands.Meta{IdempotencyKey: "reused"}, WorkspaceID: h.ws.ID, Key: "REUSE", Name: "x"})
+		code(t, err, service.CodeConflict)
 	})
 }
 
