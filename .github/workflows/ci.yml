@@ -1,0 +1,48 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: kanboard
+          POSTGRES_PASSWORD: kanboard
+          POSTGRES_DB: kanboard_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U kanboard" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: gen check
+        run: |
+          if [ ! -f sqlc.yaml ]; then echo "no sqlc.yaml yet"; exit 0; fi
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+          sqlc generate && go generate ./... && go mod tidy
+          git diff --exit-code
+      - name: vet and fmt
+        run: |
+          go vet ./...
+          test -z "$(gofmt -l .)"
+      - name: test
+        env:
+          KANBOARD_TEST_PG_DSN: postgres://kanboard:kanboard@localhost:5432/kanboard_test?sslmode=disable
+        run: go test -race ./...
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.5.0

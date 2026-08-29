@@ -1,0 +1,21 @@
+version: "2"
+linters:
+  enable:
+    - depguard
+    - govet
+    - staticcheck
+    - errcheck
+    - unused
+  settings:
+    depguard:
+      rules:
+        core-no-server:
+          files: ["**/internal/core/**", "**/internal/client/**", "**/internal/i18n/**", "**/ui/**"]
+          deny:
+            - pkg: "github.com/necrogami/kanboard/internal/server"
+              desc: "core and clients never import the server"
+        adapters-no-store:
+          files: ["**/internal/server/api/**", "**/internal/server/mcp/**", "**/internal/server/web/**"]
+          deny:
+            - pkg: "github.com/necrogami/kanboard/internal/server/store"
+              desc: "adapters call service, never store"
