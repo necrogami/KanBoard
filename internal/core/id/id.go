@@ -10,8 +10,11 @@ func New() string {
 	return uuid.Must(uuid.NewV7()).String()
 }
 
-// Valid reports whether s is a well-formed UUIDv7.
+// Valid reports whether s is a canonical 36-character UUIDv7 string.
 func Valid(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
 	u, err := uuid.Parse(s)
 	return err == nil && u.Version() == 7
 }

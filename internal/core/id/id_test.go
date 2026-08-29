@@ -2,6 +2,7 @@ package id_test
 
 import (
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/necrogami/kanboard/internal/core/id"
@@ -31,7 +32,14 @@ func TestNewIsMonotonic(t *testing.T) {
 }
 
 func TestValidRejectsGarbage(t *testing.T) {
-	for _, s := range []string{"", "abc", "123e4567-e89b-12d3-a456-426614174000"} {
+	v7 := id.New()
+	for _, s := range []string{
+		"",
+		"abc",
+		"123e4567-e89b-12d3-a456-426614174000",
+		strings.ReplaceAll(v7, "-", ""),
+		"{" + v7 + "}",
+	} {
 		if id.Valid(s) {
 			t.Errorf("Valid(%q) = true", s)
 		}
