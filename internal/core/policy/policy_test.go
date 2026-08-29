@@ -23,6 +23,7 @@ func TestCanMatrix(t *testing.T) {
 	readTok := &policy.Token{ID: "t", Scopes: []policy.Scope{policy.ScopeRead}}
 	writeTok := &policy.Token{ID: "t", Scopes: []policy.Scope{policy.ScopeWrite}}
 	boardTok := &policy.Token{ID: "t", Scopes: []policy.Scope{policy.ScopeWrite}, BoardIDs: []string{"b9"}}
+	adminTok := &policy.Token{ID: "t", Scopes: []policy.Scope{policy.ScopeAdmin}}
 
 	cases := []struct {
 		name string
@@ -47,6 +48,13 @@ func TestCanMatrix(t *testing.T) {
 		{"board restricted token blocked", actor(policy.WorkspaceMember, policy.ProjectMember, boardTok), policy.CardCreate, res, false},
 		{"board restricted token allowed", actor(policy.WorkspaceMember, policy.ProjectMember, boardTok), policy.CardCreate, policy.Resource{ProjectID: "p1", BoardID: "b9"}, true},
 		{"token does not lift role", actor(policy.WorkspaceMember, policy.ProjectViewer, writeTok), policy.CardCreate, res, false},
+		{"admin token allows project admin", actor(policy.WorkspaceMember, policy.ProjectAdminRole, adminTok), policy.ProjectAdmin, res, true},
+		{"admin token implies write", actor(policy.WorkspaceMember, policy.ProjectAdminRole, adminTok), policy.CardCreate, res, true},
+		{"admin token implies read", actor(policy.WorkspaceMember, policy.ProjectAdminRole, adminTok), policy.ProjectRead, res, true},
+		{"admin token does not lift role", actor(policy.WorkspaceMember, policy.ProjectMember, adminTok), policy.ProjectAdmin, res, false},
+		{"board restricted token reads project without board", actor(policy.WorkspaceMember, policy.ProjectMember, boardTok), policy.ProjectRead, policy.Resource{ProjectID: "p1"}, true},
+		{"board restricted token blocks write without board", actor(policy.WorkspaceMember, policy.ProjectMember, boardTok), policy.CardCreate, policy.Resource{ProjectID: "p1"}, false},
+		{"unknown action denied", actor(policy.WorkspaceMember, policy.ProjectAdminRole, nil), policy.Action("nope"), res, false},
 	}
 	for _, c := range cases {
 		if got := policy.Can(c.a, c.act, c.res); got != c.want {

@@ -118,9 +118,28 @@ func tokenAllows(t *Token, act Action, r Resource) bool {
 	return false
 }
 
+// knownActions lists every Action this package understands. Can denies
+// anything else outright; a later task extends this set alongside its
+// new Action constants.
+var knownActions = map[Action]bool{
+	ProjectRead:    true,
+	ProjectAdmin:   true,
+	WorkspaceAdmin: true,
+	CardCreate:     true,
+	CardUpdate:     true,
+	CardMove:       true,
+	CardArchive:    true,
+	CardRestore:    true,
+	CommentAdd:     true,
+	LabelCreate:    true,
+}
+
 // Can reports whether a may perform act on r.
 func Can(a Actor, act Action, r Resource) bool {
 	if !tokenAllows(a.Token, act, r) {
+		return false
+	}
+	if !knownActions[act] {
 		return false
 	}
 	if a.WorkspaceRole == WorkspaceAdminRole {
