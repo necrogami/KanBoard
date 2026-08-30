@@ -79,3 +79,24 @@ func TestCloseStopsDelivery(t *testing.T) {
 		t.Fatal("received after close")
 	}
 }
+
+func TestEvictedDistinguishesOverflowFromClose(t *testing.T) {
+	b := bus.New(1)
+	slow := b.Subscribe("w1")
+	own := b.Subscribe("w1")
+	own.Close()
+	if own.Evicted() {
+		t.Fatal("self-closed subscription reports evicted")
+	}
+	b.Publish(events.Event{WorkspaceID: "w1", Seq: 1})
+	b.Publish(events.Event{WorkspaceID: "w1", Seq: 2}) // overflows slow
+	if _, ok := recv(t, slow.C); !ok {
+		t.Fatal("first event lost")
+	}
+	if _, ok := recv(t, slow.C); ok {
+		t.Fatal("channel not closed after overflow")
+	}
+	if !slow.Evicted() {
+		t.Fatal("overflowed subscription does not report evicted")
+	}
+}

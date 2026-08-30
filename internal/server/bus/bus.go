@@ -18,11 +18,20 @@ type Bus struct {
 // Sub is one subscription. Receive from C; call Close when done. C is
 // closed by the bus if the subscriber falls behind (slow consumer).
 type Sub struct {
-	C    <-chan events.Event
-	c    chan events.Event
-	ws   string
-	bus  *Bus
-	once sync.Once
+	C       <-chan events.Event
+	c       chan events.Event
+	ws      string
+	bus     *Bus
+	once    sync.Once
+	evicted bool
+}
+
+// Evicted reports whether the bus closed this subscription because it
+// fell behind. False after the subscriber's own Close.
+func (s *Sub) Evicted() bool {
+	s.bus.mu.Lock()
+	defer s.bus.mu.Unlock()
+	return s.evicted
 }
 
 // New returns a bus whose subscriptions buffer up to buffer events.
@@ -62,6 +71,7 @@ func (b *Bus) Publish(ev events.Event) {
 		select {
 		case s.c <- ev:
 		default:
+			s.evicted = true
 			slow = append(slow, s)
 		}
 	}
