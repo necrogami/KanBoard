@@ -359,6 +359,52 @@ func TestLabelAndAssigneeQueries(t *testing.T) {
 		if ids, err := q.ListCardAssigneeIDs(ctx, card.ID); err != nil || len(ids) != 0 {
 			t.Fatalf("ListCardAssigneeIDs after remove = %v, %v", ids, err)
 		}
+
+		// The batched forms: one query per board (or per page) instead of
+		// one per card. A second card carries both tags, an archived third
+		// card carries a label the board query must not return.
+		card2, err := q.CreateCard(ctx, sqlitegen.CreateCardParams{ID: id.New(), WorkspaceID: ws.ID, ProjectID: p.ID, BoardID: b.ID, ColumnID: c.ID, Number: 2, Title: "t2", Description: "", Position: "k", CreatedBy: u.ID, CreatedAt: 1, UpdatedAt: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		gone, err := q.CreateCard(ctx, sqlitegen.CreateCardParams{ID: id.New(), WorkspaceID: ws.ID, ProjectID: p.ID, BoardID: b.ID, ColumnID: c.ID, Number: 3, Title: "t3", Description: "", Position: "p", CreatedBy: u.ID, CreatedAt: 1, UpdatedAt: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.SetCardArchived(ctx, sqlitegen.SetCardArchivedParams{ID: gone.ID, Version: gone.Version, ArchivedAt: sql.NullInt64{Int64: 2, Valid: true}, UpdatedAt: 2}); err != nil {
+			t.Fatal(err)
+		}
+		for _, cid := range []string{card.ID, card2.ID, gone.ID} {
+			if err := q.AddCardLabel(ctx, sqlitegen.AddCardLabelParams{WorkspaceID: ws.ID, CardID: cid, LabelID: lbl.ID}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := q.AddCardAssignee(ctx, sqlitegen.AddCardAssigneeParams{WorkspaceID: ws.ID, CardID: card2.ID, UserID: u.ID}); err != nil {
+			t.Fatal(err)
+		}
+
+		lrows, err := q.ListCardLabelIDsByBoard(ctx, b.ID)
+		if err != nil || len(lrows) != 2 {
+			t.Fatalf("ListCardLabelIDsByBoard = %+v, %v (the archived card must be excluded)", lrows, err)
+		}
+		arows, err := q.ListCardAssigneeIDsByBoard(ctx, b.ID)
+		if err != nil || len(arows) != 1 || arows[0].CardID != card2.ID || arows[0].UserID != u.ID {
+			t.Fatalf("ListCardAssigneeIDsByBoard = %+v, %v", arows, err)
+		}
+
+		labels, assignees, err := store.CardTagIDs(ctx, st.DB, st.Dialect, []string{card.ID, card2.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(labels[card.ID]) != 1 || labels[card.ID][0] != lbl.ID || len(labels[card2.ID]) != 1 {
+			t.Fatalf("CardTagIDs labels = %v", labels)
+		}
+		if len(assignees[card.ID]) != 0 || len(assignees[card2.ID]) != 1 || assignees[card2.ID][0] != u.ID {
+			t.Fatalf("CardTagIDs assignees = %v", assignees)
+		}
+		if l, a, err := store.CardTagIDs(ctx, st.DB, st.Dialect, nil); err != nil || len(l) != 0 || len(a) != 0 {
+			t.Fatalf("CardTagIDs(nil) = %v, %v, %v", l, a, err)
+		}
 	})
 }
 
@@ -574,7 +620,9 @@ var coveredQuerierMethods = map[string]bool{
 	"LastPositionInColumn":          true,
 	"LeaseJobs":                     true,
 	"ListCardAssigneeIDs":           true,
+	"ListCardAssigneeIDsByBoard":    true,
 	"ListCardLabelIDs":              true,
+	"ListCardLabelIDsByBoard":       true,
 	"ListCardsByBoard":              true,
 	"ListCardsByColumn":             true,
 	"ListColumns":                   true,

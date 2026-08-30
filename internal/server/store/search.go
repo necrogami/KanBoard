@@ -88,6 +88,55 @@ func SearchCards(ctx context.Context, db sqlitegen.DBTX, d Dialect, projectID st
 	return out, next, nil
 }
 
+// CardTagIDs returns the label ids and the assignee user ids of the
+// given cards, each grouped by card id. Like SearchCards the id list is
+// dynamic, so the query is hand-written; the alternative is one pair of
+// queries per card, which is what the search page used to do.
+func CardTagIDs(ctx context.Context, db sqlitegen.DBTX, d Dialect, cardIDs []string) (labels, assignees map[string][]string, err error) {
+	if len(cardIDs) == 0 {
+		return map[string][]string{}, map[string][]string{}, nil
+	}
+	labels, err = groupedByCard(ctx, db, d, "SELECT card_id, label_id FROM card_label WHERE card_id IN (", cardIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	assignees, err = groupedByCard(ctx, db, d, "SELECT card_id, user_id FROM card_assignee WHERE card_id IN (", cardIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return labels, assignees, nil
+}
+
+// groupedByCard runs prefix + an IN list of cardIDs + ")" and collects
+// the second column of every row under the first.
+func groupedByCard(ctx context.Context, db sqlitegen.DBTX, d Dialect, prefix string, cardIDs []string) (map[string][]string, error) {
+	var args []any
+	ph := func(v any) string {
+		args = append(args, v)
+		if d == Postgres {
+			return "$" + strconv.Itoa(len(args))
+		}
+		return "?"
+	}
+	rows, err := db.QueryContext(ctx, prefix+phList(ph, cardIDs)+")", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string][]string{}
+	for rows.Next() {
+		var card, val string
+		if err := rows.Scan(&card, &val); err != nil {
+			return nil, err
+		}
+		out[card] = append(out[card], val)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func phList(ph func(any) string, vals []string) string {
 	parts := make([]string, len(vals))
 	for i, v := range vals {

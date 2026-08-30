@@ -523,17 +523,19 @@ func (s *Service) SearchCards(ctx context.Context, actor policy.Actor, projectKe
 	if err != nil {
 		return nil, "", err
 	}
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.ID)
+	}
+	// One pair of queries for the page rather than a pair per card: the
+	// maximum page is 200 cards, which was 401 queries.
+	labels, assignees, err := store.CardTagIDs(ctx, s.st.DB, s.st.Dialect, ids)
+	if err != nil {
+		return nil, "", err
+	}
 	out := make([]Card, 0, len(rows))
 	for _, r := range rows {
-		labels, err := q.ListCardLabelIDs(ctx, r.ID)
-		if err != nil {
-			return nil, "", err
-		}
-		assignees, err := q.ListCardAssigneeIDs(ctx, r.ID)
-		if err != nil {
-			return nil, "", err
-		}
-		out = append(out, cardDTO(p.Key, r, labels, assignees))
+		out = append(out, cardDTO(p.Key, r, labels[r.ID], assignees[r.ID]))
 	}
 	return out, next, nil
 }

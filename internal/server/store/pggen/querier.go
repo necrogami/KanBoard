@@ -55,7 +55,13 @@ type Querier interface {
 	LastPositionInColumn(ctx context.Context, columnID string) (string, error)
 	LeaseJobs(ctx context.Context, arg LeaseJobsParams) ([]Job, error)
 	ListCardAssigneeIDs(ctx context.Context, cardID string) ([]string, error)
+	// ListCardAssigneeIDsByBoard is the batched form of ListCardAssigneeIDs
+	// for a whole board; see ListCardLabelIDsByBoard.
+	ListCardAssigneeIDsByBoard(ctx context.Context, boardID string) ([]ListCardAssigneeIDsByBoardRow, error)
 	ListCardLabelIDs(ctx context.Context, cardID string) ([]string, error)
+	// ListCardLabelIDsByBoard is the batched form of ListCardLabelIDs for a
+	// whole board: one query instead of one per card, grouped by the caller.
+	ListCardLabelIDsByBoard(ctx context.Context, boardID string) ([]ListCardLabelIDsByBoardRow, error)
 	ListCardsByBoard(ctx context.Context, boardID string) ([]Card, error)
 	ListCardsByColumn(ctx context.Context, columnID string) ([]Card, error)
 	ListColumns(ctx context.Context, boardID string) ([]BoardColumn, error)

@@ -135,17 +135,27 @@ func (s *Service) GetBoard(ctx context.Context, actor policy.Actor, projectKey s
 	if err != nil {
 		return Board{}, nil, err
 	}
+	// Two board-scoped queries rather than a pair per card: a 2000 card
+	// board is the spec 12.5 baseline and was 4001 queries.
+	labelRows, err := q.ListCardLabelIDsByBoard(ctx, b.ID)
+	if err != nil {
+		return Board{}, nil, err
+	}
+	labels := map[string][]string{}
+	for _, r := range labelRows {
+		labels[r.CardID] = append(labels[r.CardID], r.LabelID)
+	}
+	assigneeRows, err := q.ListCardAssigneeIDsByBoard(ctx, b.ID)
+	if err != nil {
+		return Board{}, nil, err
+	}
+	assignees := map[string][]string{}
+	for _, r := range assigneeRows {
+		assignees[r.CardID] = append(assignees[r.CardID], r.UserID)
+	}
 	cards := make([]Card, 0, len(rows))
 	for _, r := range rows {
-		labels, err := q.ListCardLabelIDs(ctx, r.ID)
-		if err != nil {
-			return Board{}, nil, err
-		}
-		assignees, err := q.ListCardAssigneeIDs(ctx, r.ID)
-		if err != nil {
-			return Board{}, nil, err
-		}
-		cards = append(cards, cardDTO(p.Key, r, labels, assignees))
+		cards = append(cards, cardDTO(p.Key, r, labels[r.ID], assignees[r.ID]))
 	}
 	return out, cards, nil
 }

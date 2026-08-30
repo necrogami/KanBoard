@@ -126,6 +126,42 @@ func (q *Queries) ListCardAssigneeIDs(ctx context.Context, cardID string) ([]str
 	return items, nil
 }
 
+const listCardAssigneeIDsByBoard = `-- name: ListCardAssigneeIDsByBoard :many
+SELECT ca.card_id, ca.user_id FROM card_assignee AS ca
+JOIN card AS c ON c.id = ca.card_id
+WHERE c.board_id = ?1 AND c.archived_at IS NULL
+`
+
+type ListCardAssigneeIDsByBoardRow struct {
+	CardID string
+	UserID string
+}
+
+// ListCardAssigneeIDsByBoard is the batched form of ListCardAssigneeIDs
+// for a whole board; see ListCardLabelIDsByBoard.
+func (q *Queries) ListCardAssigneeIDsByBoard(ctx context.Context, boardID string) ([]ListCardAssigneeIDsByBoardRow, error) {
+	rows, err := q.db.QueryContext(ctx, listCardAssigneeIDsByBoard, boardID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCardAssigneeIDsByBoardRow{}
+	for rows.Next() {
+		var i ListCardAssigneeIDsByBoardRow
+		if err := rows.Scan(&i.CardID, &i.UserID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCardLabelIDs = `-- name: ListCardLabelIDs :many
 SELECT label_id FROM card_label WHERE card_id = ?1
 `
@@ -143,6 +179,42 @@ func (q *Queries) ListCardLabelIDs(ctx context.Context, cardID string) ([]string
 			return nil, err
 		}
 		items = append(items, label_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCardLabelIDsByBoard = `-- name: ListCardLabelIDsByBoard :many
+SELECT cl.card_id, cl.label_id FROM card_label AS cl
+JOIN card AS c ON c.id = cl.card_id
+WHERE c.board_id = ?1 AND c.archived_at IS NULL
+`
+
+type ListCardLabelIDsByBoardRow struct {
+	CardID  string
+	LabelID string
+}
+
+// ListCardLabelIDsByBoard is the batched form of ListCardLabelIDs for a
+// whole board: one query instead of one per card, grouped by the caller.
+func (q *Queries) ListCardLabelIDsByBoard(ctx context.Context, boardID string) ([]ListCardLabelIDsByBoardRow, error) {
+	rows, err := q.db.QueryContext(ctx, listCardLabelIDsByBoard, boardID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCardLabelIDsByBoardRow{}
+	for rows.Next() {
+		var i ListCardLabelIDsByBoardRow
+		if err := rows.Scan(&i.CardID, &i.LabelID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

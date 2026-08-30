@@ -206,9 +206,33 @@ func (a *pgQuerier) ListCardAssigneeIDs(ctx context.Context, arg string) ([]stri
 	return r, err
 }
 
+func (a *pgQuerier) ListCardAssigneeIDsByBoard(ctx context.Context, arg string) ([]sqlitegen.ListCardAssigneeIDsByBoardRow, error) {
+	rs, err := a.q.ListCardAssigneeIDsByBoard(ctx, arg)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]sqlitegen.ListCardAssigneeIDsByBoardRow, len(rs))
+	for i := range rs {
+		out[i] = sqlitegen.ListCardAssigneeIDsByBoardRow(rs[i])
+	}
+	return out, nil
+}
+
 func (a *pgQuerier) ListCardLabelIDs(ctx context.Context, arg string) ([]string, error) {
 	r, err := a.q.ListCardLabelIDs(ctx, arg)
 	return r, err
+}
+
+func (a *pgQuerier) ListCardLabelIDsByBoard(ctx context.Context, arg string) ([]sqlitegen.ListCardLabelIDsByBoardRow, error) {
+	rs, err := a.q.ListCardLabelIDsByBoard(ctx, arg)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]sqlitegen.ListCardLabelIDsByBoardRow, len(rs))
+	for i := range rs {
+		out[i] = sqlitegen.ListCardLabelIDsByBoardRow(rs[i])
+	}
+	return out, nil
 }
 
 func (a *pgQuerier) ListCardsByBoard(ctx context.Context, arg string) ([]sqlitegen.Card, error) {

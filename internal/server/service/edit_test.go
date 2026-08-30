@@ -169,3 +169,71 @@ func TestCreateLabelDuplicateNameIsConflict(t *testing.T) {
 		_ = code(t, err, service.CodeConflict)
 	})
 }
+
+// TestBoardAndSearchGroupLabelsPerCard guards the batched label and
+// assignee reads: GetBoard and SearchCards fetch them for the whole
+// board or page in one query each and group them in Go, so a grouping
+// slip would silently give a card another card's labels.
+func TestBoardAndSearchGroupLabelsPerCard(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st *store.Store) {
+		h := newHarness(t, st)
+		ctx := context.Background()
+		p, _, cards := projectWithCards(t, h, "GRP", 3)
+
+		bug, err := h.svc.CreateLabel(ctx, h.admin, commands.CreateLabel{ProjectID: p.ID, Name: "bug", Color: "#FF0000"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		chore, err := h.svc.CreateLabel(ctx, h.admin, commands.CreateLabel{ProjectID: p.ID, Name: "chore", Color: "#00FF00"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.svc.SetCardLabels(ctx, h.admin, commands.SetCardLabels{CardKey: cards[0].Key, LabelIDs: []string{bug.ID, chore.ID}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.svc.SetCardLabels(ctx, h.admin, commands.SetCardLabels{CardKey: cards[1].Key, LabelIDs: []string{chore.ID}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.svc.SetAssignees(ctx, h.admin, commands.SetAssignees{CardKey: cards[2].Key, UserIDs: []string{h.ws.AdminUserID}}); err != nil {
+			t.Fatal(err)
+		}
+
+		check := func(what string, got []service.Card) {
+			t.Helper()
+			byKey := map[string]service.Card{}
+			for _, c := range got {
+				byKey[c.Key] = c
+			}
+			if len(byKey) != 3 {
+				t.Fatalf("%s returned %d cards", what, len(got))
+			}
+			if ls := byKey[cards[0].Key].LabelIDs; len(ls) != 2 {
+				t.Fatalf("%s: card 1 labels = %v", what, ls)
+			}
+			if ls := byKey[cards[1].Key].LabelIDs; len(ls) != 1 || ls[0] != chore.ID {
+				t.Fatalf("%s: card 2 labels = %v", what, ls)
+			}
+			if ls := byKey[cards[2].Key].LabelIDs; len(ls) != 0 {
+				t.Fatalf("%s: card 3 labels = %v", what, ls)
+			}
+			if as := byKey[cards[2].Key].AssigneeIDs; len(as) != 1 || as[0] != h.ws.AdminUserID {
+				t.Fatalf("%s: card 3 assignees = %v", what, as)
+			}
+			if as := byKey[cards[0].Key].AssigneeIDs; len(as) != 0 {
+				t.Fatalf("%s: card 1 assignees = %v", what, as)
+			}
+		}
+
+		_, boardCards, err := h.svc.GetBoard(ctx, h.admin, "GRP")
+		if err != nil {
+			t.Fatal(err)
+		}
+		check("GetBoard", boardCards)
+
+		found, _, err := h.svc.SearchCards(ctx, h.admin, "GRP", filter.Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		check("SearchCards", found)
+	})
+}
