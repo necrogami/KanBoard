@@ -40,7 +40,22 @@ func (s *Service) CreateLabel(ctx context.Context, actor policy.Actor, cmd comma
 	return out, err
 }
 
+// dedupe drops repeated ids from ids, keeping first-seen order, so a
+// caller sending the same id twice does not produce two "add" entries.
+func dedupe(ids []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 func diff(current, desired []string) (add, remove []string) {
+	desired = dedupe(desired)
 	have := map[string]bool{}
 	for _, c := range current {
 		have[c] = true

@@ -444,34 +444,35 @@ func (s *Service) RestoreCard(ctx context.Context, actor policy.Actor, cmd comma
 }
 
 // GetCard returns a card and its comments for readers of the project.
+// Like SearchCards, it reads through the plain Querier with no
+// transaction: a card plus its labels, assignees and comments read
+// without a snapshot is accepted at this layer, and the hottest read
+// path should not take the SQLite write lock (BEGIN IMMEDIATE) for a
+// pure read.
 func (s *Service) GetCard(ctx context.Context, actor policy.Actor, key string) (Card, []Comment, error) {
-	var card Card
-	var comments []Comment
-	err := s.st.WithTx(ctx, func(q store.Querier) error {
-		now := s.clock.Now()
-		tx := &Tx{ctx: ctx, Q: q, Now: now, NowMs: clock.Millis(now), s: s, actor: actor}
-		c, p, err := tx.loadCard(key)
-		if err != nil {
-			return err
-		}
-		if err := tx.can(policy.ProjectRead, policy.Resource{ProjectID: p.ID, BoardID: c.BoardID}); err != nil {
-			return err
-		}
-		card, err = tx.cardResult(p, c)
-		if err != nil {
-			return err
-		}
-		rows, err := q.ListComments(ctx, c.ID)
-		if err != nil {
-			return err
-		}
-		comments = make([]Comment, 0, len(rows))
-		for _, r := range rows {
-			comments = append(comments, commentDTO(r))
-		}
-		return nil
-	})
-	return card, comments, err
+	q := s.st.Q()
+	now := s.clock.Now()
+	tx := &Tx{ctx: ctx, Q: q, Now: now, NowMs: clock.Millis(now), s: s, actor: actor}
+	c, p, err := tx.loadCard(key)
+	if err != nil {
+		return Card{}, nil, err
+	}
+	if err := tx.can(policy.ProjectRead, policy.Resource{ProjectID: p.ID, BoardID: c.BoardID}); err != nil {
+		return Card{}, nil, err
+	}
+	card, err := tx.cardResult(p, c)
+	if err != nil {
+		return Card{}, nil, err
+	}
+	rows, err := q.ListComments(ctx, c.ID)
+	if err != nil {
+		return Card{}, nil, err
+	}
+	comments := make([]Comment, 0, len(rows))
+	for _, r := range rows {
+		comments = append(comments, commentDTO(r))
+	}
+	return card, comments, nil
 }
 
 // SearchCards runs the structured filter within a project.

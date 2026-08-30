@@ -2,10 +2,12 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/necrogami/kanboard/internal/core/commands"
+	"github.com/necrogami/kanboard/internal/core/events"
 	"github.com/necrogami/kanboard/internal/core/filter"
 	"github.com/necrogami/kanboard/internal/server/service"
 	"github.com/necrogami/kanboard/internal/server/store"
@@ -48,6 +50,27 @@ func TestUpdateCardFieldsAndEvents(t *testing.T) {
 		_, err = h.svc.UpdateCard(ctx, h.admin, commands.UpdateCard{Meta: commands.Meta{ExpectedVersion: 1}, CardKey: cards[0].Key, Title: &other})
 		if se := code(t, err, service.CodeConflict); se.CurrentVersion != before {
 			t.Fatalf("current version = %d, want %d", se.CurrentVersion, before)
+		}
+		// Description-only change: exactly one card.updated, naming the
+		// field but carrying no old or new text.
+		desc := "sensitive body"
+		c, err = h.svc.UpdateCard(ctx, h.admin, commands.UpdateCard{CardKey: cards[0].Key, Description: &desc})
+		if err != nil || c.Version != before+1 {
+			t.Fatalf("description update: %+v, %v", c, err)
+		}
+		if err := st.DB.QueryRow("SELECT count(*) FROM event WHERE kind = 'card.updated'").Scan(&n); err != nil || n != 4 {
+			t.Fatalf("card.updated events after description = %d, want 4", n)
+		}
+		var payload string
+		if err := st.DB.QueryRow("SELECT payload FROM event WHERE kind = 'card.updated' ORDER BY seq DESC LIMIT 1").Scan(&payload); err != nil {
+			t.Fatal(err)
+		}
+		var up events.CardUpdatedPayload
+		if err := json.Unmarshal([]byte(payload), &up); err != nil {
+			t.Fatal(err)
+		}
+		if up.Field != "description" || up.Old != "" || up.New != "" {
+			t.Fatalf("description payload = %+v", up)
 		}
 	})
 }
@@ -103,9 +126,23 @@ func TestCommentsLabelsAssignees(t *testing.T) {
 		if err != nil || len(c.LabelIDs) != 0 {
 			t.Fatalf("clear labels = %+v, %v", c, err)
 		}
+		// Re-sending the identical (empty) label set is a no-op: version
+		// unchanged, no event.
+		noopLabelVersion := c.Version
+		c, err = h.svc.SetCardLabels(ctx, h.admin, commands.SetCardLabels{CardKey: cards[0].Key})
+		if err != nil || c.Version != noopLabelVersion {
+			t.Fatalf("no-op labels bumped version: %d -> %d, %v", noopLabelVersion, c.Version, err)
+		}
 		c, err = h.svc.SetAssignees(ctx, h.admin, commands.SetAssignees{CardKey: cards[0].Key, UserIDs: []string{h.ws.AdminUserID}})
 		if err != nil || len(c.AssigneeIDs) != 1 {
 			t.Fatalf("assignees = %+v, %v", c, err)
+		}
+		// Re-sending the identical assignee set is a no-op: version
+		// unchanged, no event.
+		noopAssigneeVersion := c.Version
+		c, err = h.svc.SetAssignees(ctx, h.admin, commands.SetAssignees{CardKey: cards[0].Key, UserIDs: []string{h.ws.AdminUserID}})
+		if err != nil || c.Version != noopAssigneeVersion {
+			t.Fatalf("no-op assignees bumped version: %d -> %d, %v", noopAssigneeVersion, c.Version, err)
 		}
 		_, err = h.svc.SetAssignees(ctx, h.admin, commands.SetAssignees{CardKey: cards[0].Key, UserIDs: []string{"stranger"}})
 		code(t, err, service.CodeValidation)
