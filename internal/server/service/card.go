@@ -369,9 +369,10 @@ func (s *Service) UpdateCard(ctx context.Context, actor policy.Actor, cmd comman
 			title, changed = *cmd.Title, true
 		}
 		if cmd.Description != nil && *cmd.Description != desc {
-			// Descriptions are up to 100 KB of user content; the event
-			// records that the field changed, not the text (spec 4.3
-			// payloads carry ids and names, and the log is forever).
+			// Descriptions are up to 100 KB of user content, so the event
+			// records that the field changed, not the text. Titles are
+			// short display names and do carry their values; the rule is
+			// stated on the payload structs in internal/core/events.
 			if err := tx.emit(events.CardUpdated, sc, events.CardUpdatedPayload{Field: "description", Old: "", New: ""}); err != nil {
 				return err
 			}

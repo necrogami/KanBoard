@@ -108,6 +108,15 @@ func New(kind Kind, payload any) (Event, error) {
 }
 
 // Payload structs. Field names are part of the webhook and SSE contract.
+//
+// What user content a payload may carry, since the log is append-only
+// and survives account deletion by design (spec 4.3): a payload carries
+// ids, and the short display names a reader needs to render an activity
+// entry without a lookup (a card title, a column name, a label name).
+// It never carries a large free-text field: a change to one records
+// only that the field changed. Card titles are therefore retained in
+// the log verbatim, and a title can contain personal data, which is a
+// deliberate trade for a legible history.
 
 type CardCreatedPayload struct {
 	Number     int64  `json:"number"`
@@ -116,6 +125,8 @@ type CardCreatedPayload struct {
 	ColumnName string `json:"column_name"`
 }
 
+// CardUpdatedPayload carries the old and new value of a short field and
+// empty strings for a large one; see the rule above the payload structs.
 type CardUpdatedPayload struct {
 	Field string `json:"field"`
 	Old   string `json:"old"`
