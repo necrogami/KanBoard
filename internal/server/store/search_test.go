@@ -66,13 +66,28 @@ func TestSearchCards(t *testing.T) {
 	storetest.Each(t, func(t *testing.T, st *store.Store) {
 		ctx := context.Background()
 		q := st.Q()
-		ws, _ := q.CreateWorkspace(ctx, sqlitegen.CreateWorkspaceParams{ID: id.New(), Name: "W", Slug: "s", CreatedAt: 1, UpdatedAt: 1})
-		u, _ := q.CreateUser(ctx, sqlitegen.CreateUserParams{ID: id.New(), WorkspaceID: ws.ID, Email: sql.NullString{String: "a@b.c", Valid: true}, Name: "A", Kind: "human", Locale: "en", CreatedAt: 1, UpdatedAt: 1})
-		p, _ := q.CreateProject(ctx, sqlitegen.CreateProjectParams{ID: id.New(), WorkspaceID: ws.ID, Key: "SRCH", Name: "S", CreatedAt: 1, UpdatedAt: 1})
-		b, _ := q.CreateBoard(ctx, sqlitegen.CreateBoardParams{ID: id.New(), WorkspaceID: ws.ID, ProjectID: p.ID, Name: "B", Position: "V", CreatedAt: 1, UpdatedAt: 1})
-		c1, _ := q.CreateColumn(ctx, sqlitegen.CreateColumnParams{ID: id.New(), WorkspaceID: ws.ID, BoardID: b.ID, Name: "A", Position: "F", Category: "todo", CreatedAt: 1, UpdatedAt: 1})
-		c2, _ := q.CreateColumn(ctx, sqlitegen.CreateColumnParams{ID: id.New(), WorkspaceID: ws.ID, BoardID: b.ID, Name: "B", Position: "V", Category: "done", CreatedAt: 1, UpdatedAt: 1})
-		lbl, _ := q.CreateLabel(ctx, sqlitegen.CreateLabelParams{ID: id.New(), WorkspaceID: ws.ID, ProjectID: p.ID, Name: "bug", Color: "#FF0000", CreatedAt: 1, UpdatedAt: 1})
+		// Every constructor error is checked: a setup failure here used to
+		// surface as a confusing assertion failure much further down.
+		must := func(err error) {
+			t.Helper()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		ws, err := q.CreateWorkspace(ctx, sqlitegen.CreateWorkspaceParams{ID: id.New(), Name: "W", Slug: "s", CreatedAt: 1, UpdatedAt: 1})
+		must(err)
+		u, err := q.CreateUser(ctx, sqlitegen.CreateUserParams{ID: id.New(), WorkspaceID: ws.ID, Email: sql.NullString{String: "a@b.c", Valid: true}, Name: "A", Kind: "human", Locale: "en", CreatedAt: 1, UpdatedAt: 1})
+		must(err)
+		p, err := q.CreateProject(ctx, sqlitegen.CreateProjectParams{ID: id.New(), WorkspaceID: ws.ID, Key: "SRCH", Name: "S", CreatedAt: 1, UpdatedAt: 1})
+		must(err)
+		b, err := q.CreateBoard(ctx, sqlitegen.CreateBoardParams{ID: id.New(), WorkspaceID: ws.ID, ProjectID: p.ID, Name: "B", Position: "V", CreatedAt: 1, UpdatedAt: 1})
+		must(err)
+		c1, err := q.CreateColumn(ctx, sqlitegen.CreateColumnParams{ID: id.New(), WorkspaceID: ws.ID, BoardID: b.ID, Name: "A", Position: "F", Category: "todo", CreatedAt: 1, UpdatedAt: 1})
+		must(err)
+		c2, err := q.CreateColumn(ctx, sqlitegen.CreateColumnParams{ID: id.New(), WorkspaceID: ws.ID, BoardID: b.ID, Name: "B", Position: "V", Category: "done", CreatedAt: 1, UpdatedAt: 1})
+		must(err)
+		lbl, err := q.CreateLabel(ctx, sqlitegen.CreateLabelParams{ID: id.New(), WorkspaceID: ws.ID, ProjectID: p.ID, Name: "bug", Color: "#FF0000", CreatedAt: 1, UpdatedAt: 1})
+		must(err)
 		mk := func(n int64, col, title string, updated int64) sqlitegen.Card {
 			c, err := q.CreateCard(ctx, sqlitegen.CreateCardParams{ID: id.New(), WorkspaceID: ws.ID, ProjectID: p.ID, BoardID: b.ID, ColumnID: col, Number: n, Title: title, Description: "", Position: "V" + string(rune('a'+n)), CreatedBy: u.ID, CreatedAt: updated, UpdatedAt: updated})
 			if err != nil {

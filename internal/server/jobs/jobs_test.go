@@ -1,9 +1,12 @@
 package jobs_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -74,9 +77,16 @@ func TestOutboxJobsRunAfterCommit(t *testing.T) {
 		if len(rec.seen) != 2 || rec.seen[0] != "workspace.created" || rec.seen[1] != "member.added" {
 			t.Fatalf("seen = %v, want [workspace.created member.added]", rec.seen)
 		}
-		rows, _ := st.Q().ListJobsByState(ctx, sqlitegen.ListJobsByStateParams{State: "done", Lim: 10})
-		if len(rows) != 2 || rows[0].WorkspaceID.String != ws.ID {
-			t.Fatalf("done jobs = %+v", rows)
+		rows, err := st.Q().ListJobsByState(ctx, sqlitegen.ListJobsByStateParams{State: "done", Lim: 10})
+		if err != nil || len(rows) != 2 {
+			t.Fatalf("done jobs = %d, %v", len(rows), err)
+		}
+		// Both rows share a created_at millisecond, so neither index is
+		// meaningful on its own; assert the property of the whole set.
+		for _, r := range rows {
+			if r.WorkspaceID.String != ws.ID {
+				t.Fatalf("done job in workspace %q, want %q", r.WorkspaceID.String, ws.ID)
+			}
 		}
 	})
 }
@@ -280,6 +290,71 @@ func TestCancelledContextReleasesTheJob(t *testing.T) {
 		}
 		if got.LastError.Valid {
 			t.Fatalf("last_error = %q, want none", got.LastError.String)
+		}
+	})
+}
+
+func TestEnqueueRequiresAKind(t *testing.T) {
+	st := storetest.OpenSQLite(t)
+	if _, err := jobs.Enqueue(context.Background(), st.Q(), time.Now(), jobs.Spec{Payload: "{}"}); err == nil {
+		t.Fatal("a job with no kind was enqueued")
+	}
+}
+
+// TestRunnerOptionsAndFutureRunAt covers the knobs plan 3 configures
+// from the environment (spec 5.9) and the RunAt a scheduled job uses:
+// a job dated in the future is not leased until its time comes, a
+// batch of one leases one job per pass, and the injected logger is the
+// one that receives the dead-letter line.
+func TestRunnerOptionsAndFutureRunAt(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st *store.Store) {
+		ctx := context.Background()
+		fake := clock.NewFake(time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC))
+		var logged bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelError}))
+		r := jobs.New(st,
+			jobs.WithClock(fake), jobs.WithJitter(func() float64 { return 0 }),
+			jobs.WithBatch(1), jobs.WithLease(time.Minute), jobs.WithLogger(logger))
+		rec := &recorder{}
+		r.Register("test.echo", rec.handle)
+
+		for _, p := range []string{"now-1", "now-2"} {
+			if _, err := jobs.Enqueue(ctx, st.Q(), fake.Now(), jobs.Spec{Kind: "test.echo", Payload: p}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		later, err := jobs.Enqueue(ctx, st.Q(), fake.Now(), jobs.Spec{Kind: "test.unknown", Payload: "later", RunAt: fake.Now().Add(time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// WithBatch(1): one job per pass, and the scheduled one is not due.
+		for i := 1; i <= 2; i++ {
+			if n, err := r.RunOnce(ctx); err != nil || n != 1 {
+				t.Fatalf("pass %d leased %d jobs, %v", i, n, err)
+			}
+		}
+		if n, _ := r.RunOnce(ctx); n != 0 {
+			t.Fatalf("a job dated an hour ahead ran early")
+		}
+		if got, err := st.Q().GetJob(ctx, later); err != nil || got.State != "queued" || got.Attempts != 0 {
+			t.Fatalf("scheduled job = %+v, %v", got, err)
+		}
+
+		// Its time comes: no handler is registered, so it dead-letters and
+		// the injected logger is where that is reported.
+		fake.Advance(2 * time.Hour)
+		if n, err := r.RunOnce(ctx); err != nil || n != 1 {
+			t.Fatalf("scheduled job did not run: %d, %v", n, err)
+		}
+		if got, err := st.Q().GetJob(ctx, later); err != nil || got.State != "dead" {
+			t.Fatalf("scheduled job = %+v, %v", got, err)
+		}
+		if !strings.Contains(logged.String(), "dead letter") {
+			t.Fatalf("injected logger saw %q", logged.String())
+		}
+		if len(rec.seen) != 2 {
+			t.Fatalf("handler ran %d times", len(rec.seen))
 		}
 	})
 }

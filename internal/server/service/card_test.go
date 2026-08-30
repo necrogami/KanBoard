@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ func TestCreateCardNumbersAndOrders(t *testing.T) {
 		h := newHarness(t, st)
 		_, b, cards := projectWithCards(t, h, "NUM", 3)
 		for i, c := range cards {
-			if c.Number != int64(i+1) || c.Key != "NUM-"+string(rune('1'+i)) {
+			if c.Number != int64(i+1) || c.Key != "NUM-"+strconv.Itoa(i+1) {
 				t.Fatalf("card %d = %s number %d", i, c.Key, c.Number)
 			}
 			if c.ColumnID != b.Columns[0].ID {
