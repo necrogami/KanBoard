@@ -192,10 +192,9 @@ func (r *Runner) RunOnce(ctx context.Context) (int, error) {
 	// lease_owner, lease_expires_at and completed_at are nullable columns,
 	// so sqlc types the parameters compared with or assigned to them as
 	// sql.NullString / sql.NullInt64.
-	// One lease deadline for the whole batch, which then runs serially.
-	// That is safe while the lease is five minutes and the batch is ten:
-	// the last job still has most of the lease left. A second worker, or
-	// a bigger batch, means re-stamping the deadline per job.
+	// One lease deadline for the whole batch, which then runs serially;
+	// runOne re-stamps each job's deadline before calling its handler, so
+	// a slow job at the head does not eat into the leases behind it.
 	rows, err := r.st.Q().LeaseJobs(ctx, sqlitegen.LeaseJobsParams{
 		Owner: r.owner(), LeaseUntil: nullMs(now.Add(r.lease)),
 		NowQueued: clock.Millis(now), NowLeased: nullMs(now), Batch: r.batch,
@@ -237,6 +236,22 @@ func (r *Runner) runOne(ctx context.Context, row sqlitegen.Job) {
 	if !ok {
 		err = fmt.Errorf("no handler registered for kind %q", row.Kind)
 		r.dead(book, row.ID, err)
+		return
+	}
+	// The batch carries one deadline for jobs that run serially, so give
+	// this job a lease that starts now rather than when the batch was
+	// leased. Zero rows means another runner reclaimed it while the jobs
+	// ahead of it were running, and it is no longer ours to run or to
+	// report on.
+	held, lerr := r.st.Q().UpdateJobLease(book, sqlitegen.UpdateJobLeaseParams{
+		ID: row.ID, LeaseUntil: nullMs(r.clock.Now().Add(r.lease)), Owner: r.owner(),
+	})
+	if lerr != nil {
+		r.log.Error("jobs: extend lease", "id", row.ID, "err", lerr)
+		return
+	}
+	if held == 0 {
+		r.log.Warn("jobs: lease lost before the handler ran, skipping", "id", row.ID, "kind", row.Kind)
 		return
 	}
 	err = r.safeCall(ctx, h, job)

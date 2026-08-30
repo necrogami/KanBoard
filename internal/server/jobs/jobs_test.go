@@ -383,3 +383,139 @@ func TestRegisterWhileRunning(t *testing.T) {
 		r.Wake()
 	}
 }
+
+// TestLeaseIsReStampedPerJob: one lease deadline is stamped for the
+// whole batch, which then runs serially, so a slow job at the head of
+// the batch used to leave the jobs behind it holding a deadline that
+// had already passed by the time they ran. Another runner could then
+// reclaim a job while it was running. The runner re-stamps each job's
+// lease immediately before calling its handler.
+func TestLeaseIsReStampedPerJob(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st *store.Store) {
+		ctx := context.Background()
+		fake := clock.NewFake(time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC))
+		zero := jobs.WithJitter(func() float64 { return 0 })
+		owner := jobs.New(st, jobs.WithClock(fake), jobs.WithLease(time.Minute), jobs.WithBatch(10), zero)
+		thief := jobs.New(st, jobs.WithClock(fake), jobs.WithLease(time.Minute), zero)
+
+		stolen := 0
+		thief.Register("test.slow", func(context.Context, jobs.Job) error { stolen++; return nil })
+
+		ran := map[string]bool{}
+		owner.Register("test.slow", func(ctx context.Context, j jobs.Job) error {
+			ran[j.Payload] = true
+			switch j.Payload {
+			case "a":
+				// The head of the batch overruns the deadline that was
+				// stamped for the whole batch.
+				fake.Advance(2 * time.Minute)
+			case "b":
+				// The tail is running now, so its lease must be live now.
+				n, err := thief.RunOnce(ctx)
+				if err != nil {
+					t.Errorf("thief RunOnce: %v", err)
+				}
+				if n != 0 {
+					t.Errorf("a second runner reclaimed %d job(s) while they were running", n)
+				}
+			}
+			return nil
+		})
+
+		var ids []string
+		for _, payload := range []string{"a", "b"} {
+			jid, err := jobs.Enqueue(ctx, st.Q(), fake.Now(), jobs.Spec{Kind: "test.slow", Payload: payload})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ids = append(ids, jid)
+		}
+
+		if n, err := owner.RunOnce(ctx); err != nil || n != 2 {
+			t.Fatalf("RunOnce = %d, %v", n, err)
+		}
+		if !ran["a"] || !ran["b"] {
+			t.Fatalf("handlers ran = %v", ran)
+		}
+		if stolen != 0 {
+			t.Fatalf("the second runner ran %d stolen job(s)", stolen)
+		}
+		for i, jid := range ids {
+			got, err := st.Q().GetJob(ctx, jid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.State != "done" {
+				t.Fatalf("job %d state = %q, want done (it was completed by another owner)", i, got.State)
+			}
+			if got.Attempts != 1 || got.LeaseOwner.Valid {
+				t.Fatalf("job %d = %+v", i, got)
+			}
+		}
+	})
+}
+
+// TestJobIsSkippedWhenTheLeaseIsAlreadyLost covers the other half of the
+// per-job re-stamp. The head of the batch overruns its own lease and
+// another worker reclaims what is left of the batch. When the runner
+// reaches the next job the re-stamp matches no row, so it leaves the job
+// alone rather than running it behind the new owner's back and then
+// reporting on a lease it no longer holds.
+func TestJobIsSkippedWhenTheLeaseIsAlreadyLost(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st *store.Store) {
+		ctx := context.Background()
+		fake := clock.NewFake(time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC))
+		zero := jobs.WithJitter(func() float64 { return 0 })
+		var logged bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn}))
+		owner := jobs.New(st, jobs.WithClock(fake), jobs.WithLease(time.Minute), jobs.WithBatch(10), jobs.WithLogger(logger), zero)
+		thief := jobs.New(st, jobs.WithClock(fake), jobs.WithLease(time.Hour), zero)
+
+		thiefRan := &recorder{}
+		thief.Register("test.slow", thiefRan.handle)
+		ownerRan := &recorder{}
+		owner.Register("test.slow", func(ctx context.Context, j jobs.Job) error {
+			if err := ownerRan.handle(ctx, j); err != nil {
+				return err
+			}
+			if j.Payload == "a" {
+				// The head overruns the batch deadline and the tail is
+				// reclaimed and run by another runner before we reach it.
+				fake.Advance(2 * time.Minute)
+				if n, err := thief.RunOnce(ctx); err != nil || n != 2 {
+					t.Errorf("thief RunOnce = %d, %v (both leases have expired)", n, err)
+				}
+			}
+			return nil
+		})
+
+		var ids []string
+		for _, payload := range []string{"a", "b"} {
+			jid, err := jobs.Enqueue(ctx, st.Q(), fake.Now(), jobs.Spec{Kind: "test.slow", Payload: payload})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ids = append(ids, jid)
+		}
+		if n, err := owner.RunOnce(ctx); err != nil || n != 2 {
+			t.Fatalf("RunOnce = %d, %v", n, err)
+		}
+		if len(ownerRan.seen) != 1 || ownerRan.seen[0] != "a" {
+			t.Fatalf("the first runner ran %v, want only the head of the batch", ownerRan.seen)
+		}
+		if len(thiefRan.seen) != 2 {
+			t.Fatalf("the reclaiming runner ran %v, want both jobs of the expired batch", thiefRan.seen)
+		}
+		if !strings.Contains(logged.String(), "lease lost before the handler ran") {
+			t.Fatalf("no warning for the skipped job: %q", logged.String())
+		}
+		// The reclaiming runner's completion stands.
+		got, err := st.Q().GetJob(ctx, ids[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.State != "done" || got.LeaseOwner.Valid {
+			t.Fatalf("reclaimed job = %+v", got)
+		}
+	})
+}

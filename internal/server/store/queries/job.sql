@@ -30,6 +30,15 @@ WHERE id = @id AND state = 'leased' AND lease_owner = @owner;
 UPDATE job SET state = 'dead', completed_at = @completed_at, last_error = @last_error, lease_owner = NULL, lease_expires_at = NULL
 WHERE id = @id AND state = 'leased' AND lease_owner = @owner;
 
+-- name: UpdateJobLease :execrows
+-- UpdateJobLease pushes one job's lease deadline out. LeaseJobs stamps a
+-- single deadline for a whole batch that then runs serially, so a slow
+-- job at the head would otherwise leave the jobs behind it holding a
+-- deadline that has already passed by the time they run. Zero rows means
+-- the lease is no longer ours and the job must not be run.
+UPDATE job SET lease_expires_at = @lease_until
+WHERE id = @id AND state = 'leased' AND lease_owner = @owner;
+
 -- name: ReleaseJob :exec
 -- ReleaseJob puts a leased job back in the queue exactly as it was found:
 -- the same run_at and the same attempt count, undoing the increment

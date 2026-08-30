@@ -283,3 +283,27 @@ func (q *Queries) RetryJob(ctx context.Context, arg RetryJobParams) error {
 	)
 	return err
 }
+
+const updateJobLease = `-- name: UpdateJobLease :execrows
+UPDATE job SET lease_expires_at = ?1
+WHERE id = ?2 AND state = 'leased' AND lease_owner = ?3
+`
+
+type UpdateJobLeaseParams struct {
+	LeaseUntil sql.NullInt64
+	ID         string
+	Owner      sql.NullString
+}
+
+// UpdateJobLease pushes one job's lease deadline out. LeaseJobs stamps a
+// single deadline for a whole batch that then runs serially, so a slow
+// job at the head would otherwise leave the jobs behind it holding a
+// deadline that has already passed by the time they run. Zero rows means
+// the lease is no longer ours and the job must not be run.
+func (q *Queries) UpdateJobLease(ctx context.Context, arg UpdateJobLeaseParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateJobLease, arg.LeaseUntil, arg.ID, arg.Owner)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}

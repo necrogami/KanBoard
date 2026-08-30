@@ -423,6 +423,11 @@ func (a *pgQuerier) UpdateCardFields(ctx context.Context, arg sqlitegen.UpdateCa
 	return sqlitegen.Card(r), err
 }
 
+func (a *pgQuerier) UpdateJobLease(ctx context.Context, arg sqlitegen.UpdateJobLeaseParams) (int64, error) {
+	r, err := a.q.UpdateJobLease(ctx, pggen.UpdateJobLeaseParams(arg))
+	return r, err
+}
+
 func (a *pgQuerier) UpsertProjectMember(ctx context.Context, arg sqlitegen.UpsertProjectMemberParams) error {
 	return a.q.UpsertProjectMember(ctx, pggen.UpsertProjectMemberParams(arg))
 }

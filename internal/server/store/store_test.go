@@ -580,6 +580,18 @@ func TestJobLifecycle(t *testing.T) {
 			t.Fatalf("LeaseJobs after retry = %d, %v", len(relaunched), err)
 		}
 
+		// UpdateJobLease pushes the deadline of the lease w2 now holds on
+		// j2 out; a runner that no longer holds it matches no row.
+		if n, err := q.UpdateJobLease(ctx, sqlitegen.UpdateJobLeaseParams{ID: "j2", LeaseUntil: sql.NullInt64{Int64: 500, Valid: true}, Owner: sql.NullString{String: "w2", Valid: true}}); err != nil || n != 1 {
+			t.Fatalf("UpdateJobLease as the owner = %d, %v", n, err)
+		}
+		if got, err := q.GetJob(ctx, "j2"); err != nil || got.LeaseExpiresAt.Int64 != 500 {
+			t.Fatalf("GetJob j2 after extend = %+v, %v", got, err)
+		}
+		if n, err := q.UpdateJobLease(ctx, sqlitegen.UpdateJobLeaseParams{ID: "j2", LeaseUntil: sql.NullInt64{Int64: 900, Valid: true}, Owner: sql.NullString{String: "someone-else", Valid: true}}); err != nil || n != 0 {
+			t.Fatalf("UpdateJobLease as a stale owner = %d, %v", n, err)
+		}
+
 		// ReleaseJob puts j2 back exactly as it was found, undoing the
 		// attempt LeaseJobs charged for the lease it now holds as w2.
 		if err := q.ReleaseJob(ctx, sqlitegen.ReleaseJobParams{ID: "j2", RunAt: 200, Attempts: 1, Owner: sql.NullString{String: "w2", Valid: true}}); err != nil {
@@ -713,6 +725,7 @@ var coveredQuerierMethods = map[string]bool{
 	"RetryJob":                      true,
 	"SetCardArchived":               true,
 	"TouchCard":                     true,
+	"UpdateJobLease":                true,
 	"UpdateCardFields":              true,
 	"UpsertProjectMember":           true,
 	"UpsertWorkspaceMember":         true,

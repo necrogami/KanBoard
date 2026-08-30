@@ -95,6 +95,12 @@ type Querier interface {
 	SetCardArchived(ctx context.Context, arg SetCardArchivedParams) (Card, error)
 	TouchCard(ctx context.Context, arg TouchCardParams) (Card, error)
 	UpdateCardFields(ctx context.Context, arg UpdateCardFieldsParams) (Card, error)
+	// UpdateJobLease pushes one job's lease deadline out. LeaseJobs stamps a
+	// single deadline for a whole batch that then runs serially, so a slow
+	// job at the head would otherwise leave the jobs behind it holding a
+	// deadline that has already passed by the time they run. Zero rows means
+	// the lease is no longer ours and the job must not be run.
+	UpdateJobLease(ctx context.Context, arg UpdateJobLeaseParams) (int64, error)
 	UpsertProjectMember(ctx context.Context, arg UpsertProjectMemberParams) error
 	UpsertWorkspaceMember(ctx context.Context, arg UpsertWorkspaceMemberParams) error
 }
