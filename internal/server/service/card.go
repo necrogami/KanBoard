@@ -10,6 +10,7 @@ import (
 	"github.com/necrogami/kanboard/internal/core/commands"
 	"github.com/necrogami/kanboard/internal/core/events"
 	"github.com/necrogami/kanboard/internal/core/filter"
+	"github.com/necrogami/kanboard/internal/core/id"
 	"github.com/necrogami/kanboard/internal/core/keys"
 	"github.com/necrogami/kanboard/internal/core/order"
 	"github.com/necrogami/kanboard/internal/core/policy"
@@ -63,7 +64,7 @@ func (t *Tx) cardResult(p sqlitegen.Project, c sqlitegen.Card) (Card, error) {
 
 // positionOrEmpty turns sql.ErrNoRows into the open bound.
 func positionOrEmpty(pos string, err error) (string, error) {
-	if errors.Is(err, sql.ErrNoRows) {
+	if isNoRows(err) {
 		return "", nil
 	}
 	return pos, err
@@ -500,6 +501,12 @@ func (s *Service) GetCard(ctx context.Context, actor policy.Actor, key string) (
 func (s *Service) SearchCards(ctx context.Context, actor policy.Actor, projectKey string, f filter.Filter) ([]Card, string, error) {
 	if err := f.Normalize(); err != nil {
 		return nil, "", validation(err)
+	}
+	// The cursor is the id of the last card of the previous page. It is a
+	// bound parameter, so a malformed one cannot inject anything, but it
+	// would silently return an empty page instead of saying what is wrong.
+	if f.Cursor != "" && !id.Valid(f.Cursor) {
+		return nil, "", validation(errors.New("filter: cursor is not a card id"))
 	}
 	q := s.st.Q()
 	p, err := q.GetProjectByKey(ctx, sqlitegen.GetProjectByKeyParams{WorkspaceID: actor.WorkspaceID, Key: projectKey})

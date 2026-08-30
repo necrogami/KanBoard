@@ -237,3 +237,25 @@ func TestBoardAndSearchGroupLabelsPerCard(t *testing.T) {
 		check("SearchCards", found)
 	})
 }
+
+// TestSearchRejectsMalformedCursor: the cursor is a bound parameter, so
+// a bad one cannot inject anything, but returning an empty page for it
+// hides the mistake from whoever built the request.
+func TestSearchRejectsMalformedCursor(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st *store.Store) {
+		h := newHarness(t, st)
+		ctx := context.Background()
+		projectWithCards(t, h, "CUR", 2)
+		_, _, err := h.svc.SearchCards(ctx, h.admin, "CUR", filter.Filter{Cursor: "not-an-id"})
+		_ = code(t, err, service.CodeValidation)
+		// A well-formed cursor still pages.
+		page, next, err := h.svc.SearchCards(ctx, h.admin, "CUR", filter.Filter{Limit: 1})
+		if err != nil || len(page) != 1 || next == "" {
+			t.Fatalf("first page = %d, %q, %v", len(page), next, err)
+		}
+		rest, _, err := h.svc.SearchCards(ctx, h.admin, "CUR", filter.Filter{Cursor: next})
+		if err != nil || len(rest) != 1 {
+			t.Fatalf("second page = %d, %v", len(rest), err)
+		}
+	})
+}
