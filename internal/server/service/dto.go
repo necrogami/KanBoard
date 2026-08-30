@@ -26,12 +26,15 @@ type Project struct {
 	BoardID     string `json:"board_id"`
 }
 
-// Column is one board column.
+// Column is one board column. Position is the server's fractional rank
+// key: spec 4.4 says clients express intent as after/before a sibling or
+// top/bottom and never see or send a rank string, so it is not encoded.
+// Order is carried by the array order of Board.Columns.
 type Column struct {
 	ID       string `json:"id"`
 	BoardID  string `json:"board_id"`
 	Name     string `json:"name"`
-	Position string `json:"position"`
+	Position string `json:"-"`
 	Category string `json:"category"`
 	WipLimit *int64 `json:"wip_limit"`
 	Version  int64  `json:"version"`
@@ -46,7 +49,9 @@ type Board struct {
 	Columns   []Column `json:"columns"`
 }
 
-// Card is the card shape every adapter exposes.
+// Card is the card shape every adapter exposes. Position is the
+// server's fractional rank key and is not encoded, for the reason given
+// on Column; GetBoard and SearchCards return cards in order.
 type Card struct {
 	ID          string     `json:"id"`
 	Key         string     `json:"key"`
@@ -56,7 +61,7 @@ type Card struct {
 	Number      int64      `json:"number"`
 	Title       string     `json:"title"`
 	Description string     `json:"description"`
-	Position    string     `json:"position"`
+	Position    string     `json:"-"`
 	DueDate     *time.Time `json:"due_date"`
 	CompletedAt *time.Time `json:"completed_at"`
 	ArchivedAt  *time.Time `json:"archived_at"`
