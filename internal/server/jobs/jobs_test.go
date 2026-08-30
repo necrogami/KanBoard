@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -357,4 +358,28 @@ func TestRunnerOptionsAndFutureRunAt(t *testing.T) {
 			t.Fatalf("handler ran %d times", len(rec.seen))
 		}
 	})
+}
+
+// TestRegisterWhileRunning: Register-then-Run is the documented order,
+// but nothing stopped a late registration, and the handler map was
+// written with no synchronisation against the runner reading it. Under
+// -race this test fails on the unsynchronised version.
+func TestRegisterWhileRunning(t *testing.T) {
+	st := storetest.OpenSQLite(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := jobs.New(st, jobs.WithPoll(time.Millisecond), jobs.WithJitter(func() float64 { return 0 }))
+	rec := &recorder{}
+	r.Register("test.echo", rec.handle)
+	stopped := make(chan struct{})
+	go func() { _ = r.Run(ctx); close(stopped) }()
+	t.Cleanup(func() { cancel(); <-stopped })
+
+	for i := 0; i < 50; i++ {
+		if _, err := jobs.Enqueue(ctx, st.Q(), time.Now(), jobs.Spec{Kind: "test.echo", Payload: strconv.Itoa(i)}); err != nil {
+			t.Fatal(err)
+		}
+		r.Register("test.late"+strconv.Itoa(i), rec.handle)
+		r.Wake()
+	}
 }

@@ -14,6 +14,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/necrogami/kanboard/internal/core/clock"
@@ -100,8 +101,12 @@ func Backoff(attempts int64, jitter float64) time.Duration {
 
 // Runner leases and executes jobs.
 type Runner struct {
-	st       *store.Store
-	clock    clock.Clock
+	st    *store.Store
+	clock clock.Clock
+	// handlers is guarded because Run reads it on its own goroutine.
+	// Register-then-Run remains the documented order; the lock is what
+	// makes a late registration safe rather than silently racy.
+	mu       sync.RWMutex
 	handlers map[string]Handler
 	worker   string
 	wake     chan struct{}
@@ -137,8 +142,21 @@ func New(st *store.Store, opts ...Option) *Runner {
 	return r
 }
 
-// Register sets the handler for a kind. Unknown kinds go straight to dead.
-func (r *Runner) Register(kind string, h Handler) { r.handlers[kind] = h }
+// Register sets the handler for a kind. Unknown kinds go straight to
+// dead, so register every kind before Run.
+func (r *Runner) Register(kind string, h Handler) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.handlers[kind] = h
+}
+
+// handler returns the handler for kind, if any.
+func (r *Runner) handler(kind string) (Handler, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	h, ok := r.handlers[kind]
+	return h, ok
+}
 
 // Wake nudges Run to lease immediately instead of waiting for the poll.
 func (r *Runner) Wake() {
@@ -174,6 +192,10 @@ func (r *Runner) RunOnce(ctx context.Context) (int, error) {
 	// lease_owner, lease_expires_at and completed_at are nullable columns,
 	// so sqlc types the parameters compared with or assigned to them as
 	// sql.NullString / sql.NullInt64.
+	// One lease deadline for the whole batch, which then runs serially.
+	// That is safe while the lease is five minutes and the batch is ten:
+	// the last job still has most of the lease left. A second worker, or
+	// a bigger batch, means re-stamping the deadline per job.
 	rows, err := r.st.Q().LeaseJobs(ctx, sqlitegen.LeaseJobsParams{
 		Owner: r.owner(), LeaseUntil: nullMs(now.Add(r.lease)),
 		NowQueued: clock.Millis(now), NowLeased: nullMs(now), Batch: r.batch,
@@ -210,7 +232,7 @@ func (r *Runner) runOne(ctx context.Context, row sqlitegen.Job) {
 	defer cancel()
 
 	job := Job{ID: row.ID, WorkspaceID: row.WorkspaceID.String, Kind: row.Kind, Payload: row.Payload, Attempts: row.Attempts, MaxAttempts: row.MaxAttempts}
-	h, ok := r.handlers[row.Kind]
+	h, ok := r.handler(row.Kind)
 	var err error
 	if !ok {
 		err = fmt.Errorf("no handler registered for kind %q", row.Kind)
