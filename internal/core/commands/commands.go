@@ -52,9 +52,11 @@ func maxLen(field, v string, n int) error {
 	return nil
 }
 
-// Meta carries who is acting and the idempotency and concurrency guards.
+// Meta carries the idempotency and concurrency guards, plus the token a
+// command arrived through. Who is acting is not here: the service takes
+// the actor as a separate policy.Actor argument, and a second copy on
+// the command would be a second source of truth for authorization.
 type Meta struct {
-	ActorUserID     string
 	ViaTokenID      string
 	IdempotencyKey  string
 	ExpectedVersion int64
