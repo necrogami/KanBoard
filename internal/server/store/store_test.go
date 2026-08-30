@@ -428,6 +428,15 @@ func TestJobLifecycle(t *testing.T) {
 		if got, err := q.GetJob(ctx, "j2"); err != nil || got.State != "queued" || got.RunAt != 200 {
 			t.Fatalf("GetJob j2 after retry = %+v, %v", got, err)
 		}
+		// j2 is the only row back in the queued state; CountQueuedJobs
+		// matches on kind and payload together, so a different payload
+		// matches nothing.
+		if n, err := q.CountQueuedJobs(ctx, sqlitegen.CountQueuedJobsParams{Kind: "k", Payload: "{}"}); err != nil || n != 1 {
+			t.Fatalf("CountQueuedJobs(k, {}) = %d, %v", n, err)
+		}
+		if n, err := q.CountQueuedJobs(ctx, sqlitegen.CountQueuedJobsParams{Kind: "k", Payload: `{"other":1}`}); err != nil || n != 0 {
+			t.Fatalf("CountQueuedJobs(k, other) = %d, %v", n, err)
+		}
 		relaunched, err := q.LeaseJobs(ctx, sqlitegen.LeaseJobsParams{
 			Owner:      sql.NullString{String: "w2", Valid: true},
 			LeaseUntil: sql.NullInt64{Int64: 300, Valid: true},
@@ -497,6 +506,7 @@ var coveredQuerierMethods = map[string]bool{
 	"AddCardLabel":                  true,
 	"CompleteJob":                   true,
 	"CountCardsInColumn":            true,
+	"CountQueuedJobs":               true,
 	"CountWorkspaces":               true,
 	"CreateBoard":                   true,
 	"CreateCard":                    true,

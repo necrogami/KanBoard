@@ -18,20 +18,21 @@ import (
 
 	"github.com/necrogami/kanboard/internal/core/clock"
 	"github.com/necrogami/kanboard/internal/core/id"
+	"github.com/necrogami/kanboard/internal/server/jobkind"
 	"github.com/necrogami/kanboard/internal/server/store"
 	"github.com/necrogami/kanboard/internal/server/store/sqlitegen"
 )
 
 const (
-	defaultMaxAttempts = 8
+	defaultMaxAttempts = jobkind.DefaultMaxAttempts
 	backoffBase        = 30 * time.Second
 	backoffCap         = 4 * time.Hour
 	jitterFraction     = 0.25
 
-	// KindRankRebalance is enqueued by the service layer (Task 12) when a
-	// column's fractional keys grow past order.MaxKeyLen; plan 7 registers
-	// its handler. Payload: {"column_id": "..."}.
-	KindRankRebalance = "rank.rebalance"
+	// KindRankRebalance is an alias of jobkind.RankRebalance, kept so a
+	// handler registration reads in terms of this package. The constant
+	// itself lives in jobkind because the service enqueues it.
+	KindRankRebalance = jobkind.RankRebalance
 )
 
 // Spec describes a job to enqueue.

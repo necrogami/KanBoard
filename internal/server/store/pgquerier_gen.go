@@ -33,6 +33,11 @@ func (a *pgQuerier) CountCardsInColumn(ctx context.Context, arg string) (int64, 
 	return r, err
 }
 
+func (a *pgQuerier) CountQueuedJobs(ctx context.Context, arg sqlitegen.CountQueuedJobsParams) (int64, error) {
+	r, err := a.q.CountQueuedJobs(ctx, pggen.CountQueuedJobsParams(arg))
+	return r, err
+}
+
 func (a *pgQuerier) CountWorkspaces(ctx context.Context) (int64, error) {
 	r, err := a.q.CountWorkspaces(ctx)
 	return r, err

@@ -30,6 +30,25 @@ func (q *Queries) CompleteJob(ctx context.Context, arg CompleteJobParams) error 
 	return err
 }
 
+const countQueuedJobs = `-- name: CountQueuedJobs :one
+SELECT count(*) FROM job WHERE kind = $1 AND payload = $2 AND state = 'queued'
+`
+
+type CountQueuedJobsParams struct {
+	Kind    string
+	Payload string
+}
+
+// CountQueuedJobs reports how many jobs with this kind and payload are
+// still waiting to run. An enqueuer whose job is idempotent in its
+// payload calls it inside its own transaction to skip a duplicate.
+func (q *Queries) CountQueuedJobs(ctx context.Context, arg CountQueuedJobsParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countQueuedJobs, arg.Kind, arg.Payload)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deadJob = `-- name: DeadJob :exec
 UPDATE job SET state = 'dead', completed_at = $1, last_error = $2, lease_owner = NULL, lease_expires_at = NULL
 WHERE id = $3 AND state = 'leased' AND lease_owner = $4

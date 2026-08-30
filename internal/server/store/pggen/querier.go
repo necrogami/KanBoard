@@ -17,6 +17,10 @@ type Querier interface {
 	// no row instead. RetryJob and DeadJob carry the same guard.
 	CompleteJob(ctx context.Context, arg CompleteJobParams) error
 	CountCardsInColumn(ctx context.Context, columnID string) (int64, error)
+	// CountQueuedJobs reports how many jobs with this kind and payload are
+	// still waiting to run. An enqueuer whose job is idempotent in its
+	// payload calls it inside its own transaction to skip a duplicate.
+	CountQueuedJobs(ctx context.Context, arg CountQueuedJobsParams) (int64, error)
 	CountWorkspaces(ctx context.Context) (int64, error)
 	CreateBoard(ctx context.Context, arg CreateBoardParams) (Board, error)
 	CreateCard(ctx context.Context, arg CreateCardParams) (Card, error)

@@ -13,6 +13,7 @@ import (
 	"github.com/necrogami/kanboard/internal/core/keys"
 	"github.com/necrogami/kanboard/internal/core/order"
 	"github.com/necrogami/kanboard/internal/core/policy"
+	"github.com/necrogami/kanboard/internal/server/jobkind"
 	"github.com/necrogami/kanboard/internal/server/store"
 	"github.com/necrogami/kanboard/internal/server/store/sqlitegen"
 )
@@ -166,18 +167,29 @@ func (t *Tx) versioned(id string, row sqlitegen.Card, err error) (sqlitegen.Card
 	return sqlitegen.Card{}, conflict("card was modified", cur.Version)
 }
 
-const kindRankRebalance = "rank.rebalance"
-
 // maybeRebalance enqueues rank.rebalance for a column whose keys have
 // grown past order.MaxKeyLen (spec 4.4). The row commits with the
 // mutation; plan 7 registers the handler.
+//
+// Keys only grow, so once a column crosses the limit every later create
+// or move in it would enqueue the same job again. The insert is skipped
+// while an identical job is still queued; the check runs in the mutation
+// transaction, which is the same transaction the insert would run in.
 func (t *Tx) maybeRebalance(workspaceID, columnID, pos string) error {
 	if len(pos) <= order.MaxKeyLen {
 		return nil
 	}
+	payload := `{"column_id":"` + columnID + `"}`
+	queued, err := t.Q.CountQueuedJobs(t.ctx, sqlitegen.CountQueuedJobsParams{Kind: jobkind.RankRebalance, Payload: payload})
+	if err != nil {
+		return err
+	}
+	if queued > 0 {
+		return nil
+	}
 	return t.Q.InsertJob(t.ctx, sqlitegen.InsertJobParams{
-		ID: t.s.newID(), WorkspaceID: nullStr(workspaceID), Kind: kindRankRebalance,
-		Payload: `{"column_id":"` + columnID + `"}`, MaxAttempts: 8, RunAt: t.NowMs, CreatedAt: t.NowMs,
+		ID: t.s.newID(), WorkspaceID: nullStr(workspaceID), Kind: jobkind.RankRebalance,
+		Payload: payload, MaxAttempts: jobkind.DefaultMaxAttempts, RunAt: t.NowMs, CreatedAt: t.NowMs,
 	})
 }
 

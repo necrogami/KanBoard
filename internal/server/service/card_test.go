@@ -10,6 +10,7 @@ import (
 	"github.com/necrogami/kanboard/internal/core/commands"
 	"github.com/necrogami/kanboard/internal/core/events"
 	"github.com/necrogami/kanboard/internal/core/policy"
+	"github.com/necrogami/kanboard/internal/server/jobkind"
 	"github.com/necrogami/kanboard/internal/server/service"
 	"github.com/necrogami/kanboard/internal/server/store"
 	"github.com/necrogami/kanboard/internal/server/store/sqlitegen"
@@ -281,12 +282,43 @@ func TestMoveEnqueuesRebalanceWhenKeysGrow(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, j := range jobs {
-				if j.Kind == "rank.rebalance" && strings.Contains(j.Payload, b.Columns[0].ID) {
+				if j.Kind == jobkind.RankRebalance && strings.Contains(j.Payload, b.Columns[0].ID) {
 					return
 				}
 			}
 		}
 		t.Fatal("no rank.rebalance job after 1000 prepends")
+	})
+}
+
+// TestRebalanceJobIsEnqueuedOncePerColumn: keys only grow, so without a
+// dedupe every mutation past the length limit enqueues another identical
+// job. Until plan 7 registers a handler each of those dead-letters, so a
+// busy column would produce a growing dead-letter pile.
+func TestRebalanceJobIsEnqueuedOncePerColumn(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st *store.Store) {
+		h := newHarness(t, st)
+		ctx := context.Background()
+		_, b, cards := projectWithCards(t, h, "ONCE", 2)
+		for i := 0; i < 400; i++ {
+			key := cards[i%2].Key
+			if _, _, err := h.svc.MoveCard(ctx, h.admin, commands.MoveCard{CardKey: key, ColumnID: b.Columns[0].ID, Position: commands.PositionTop}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		queued, err := st.Q().ListJobsByState(ctx, sqlitegen.ListJobsByStateParams{State: "queued", Lim: 1000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, j := range queued {
+			if j.Kind == jobkind.RankRebalance && strings.Contains(j.Payload, b.Columns[0].ID) {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Fatalf("queued rank.rebalance jobs for the column = %d, want 1", n)
+		}
 	})
 }
 

@@ -30,6 +30,12 @@ WHERE id = @id AND state = 'leased' AND lease_owner = @owner;
 UPDATE job SET state = 'dead', completed_at = @completed_at, last_error = @last_error, lease_owner = NULL, lease_expires_at = NULL
 WHERE id = @id AND state = 'leased' AND lease_owner = @owner;
 
+-- name: CountQueuedJobs :one
+-- CountQueuedJobs reports how many jobs with this kind and payload are
+-- still waiting to run. An enqueuer whose job is idempotent in its
+-- payload calls it inside its own transaction to skip a duplicate.
+SELECT count(*) FROM job WHERE kind = @kind AND payload = @payload AND state = 'queued';
+
 -- name: GetJob :one
 SELECT * FROM job WHERE id = @id;
 
