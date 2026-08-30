@@ -488,7 +488,15 @@ func (s *Service) SearchCards(ctx context.Context, actor policy.Actor, projectKe
 	if err != nil {
 		return nil, "", err
 	}
-	if !policy.Can(actor, policy.ProjectRead, policy.Resource{ProjectID: p.ID}) {
+	// Resolve the board before asking policy: a board-restricted token
+	// resolved against an empty Resource.BoardID would be allowed to read
+	// any project in the workspace, which is the restriction it exists to
+	// impose.
+	b, err := q.GetBoardByProject(ctx, p.ID)
+	if err != nil {
+		return nil, "", err
+	}
+	if !policy.Can(actor, policy.ProjectRead, policy.Resource{ProjectID: p.ID, BoardID: b.ID}) {
 		return nil, "", forbidden()
 	}
 	rows, next, err := store.SearchCards(ctx, s.st.DB, s.st.Dialect, p.ID, f)

@@ -24,7 +24,14 @@ func (s *Service) CreateLabel(ctx context.Context, actor policy.Actor, cmd comma
 		if err != nil {
 			return err
 		}
-		if err := tx.can(policy.LabelCreate, policy.Resource{ProjectID: p.ID}); err != nil {
+		// The board is resolved before the policy call so a board-restricted
+		// token is judged against the board it is scoped to; with an empty
+		// Resource.BoardID such a token can never create a label at all.
+		b, err := tx.Q.GetBoardByProject(tx.ctx, p.ID)
+		if err != nil {
+			return err
+		}
+		if err := tx.can(policy.LabelCreate, policy.Resource{ProjectID: p.ID, BoardID: b.ID}); err != nil {
 			return err
 		}
 		row, err := tx.Q.CreateLabel(tx.ctx, sqlitegen.CreateLabelParams{ID: s.newID(), WorkspaceID: p.WorkspaceID, ProjectID: p.ID, Name: cmd.Name, Color: cmd.Color, CreatedAt: tx.NowMs, UpdatedAt: tx.NowMs})
