@@ -233,6 +233,34 @@ func (q *Queries) ListJobsByState(ctx context.Context, arg ListJobsByStateParams
 	return items, nil
 }
 
+const releaseJob = `-- name: ReleaseJob :exec
+UPDATE job SET state = 'queued', run_at = ?1, attempts = ?2, lease_owner = NULL, lease_expires_at = NULL
+WHERE id = ?3 AND state = 'leased' AND lease_owner = ?4
+`
+
+type ReleaseJobParams struct {
+	RunAt    int64
+	Attempts int64
+	ID       string
+	Owner    sql.NullString
+}
+
+// ReleaseJob puts a leased job back in the queue exactly as it was found:
+// the same run_at and the same attempt count, undoing the increment
+// LeaseJobs made. The runner uses it when its context is cancelled while
+// a handler runs, so a shutdown neither burns an attempt nor leaves the
+// row leased for the rest of the lease. Guarded by the lease owner; see
+// CompleteJob.
+func (q *Queries) ReleaseJob(ctx context.Context, arg ReleaseJobParams) error {
+	_, err := q.db.ExecContext(ctx, releaseJob,
+		arg.RunAt,
+		arg.Attempts,
+		arg.ID,
+		arg.Owner,
+	)
+	return err
+}
+
 const retryJob = `-- name: RetryJob :exec
 UPDATE job SET state = 'queued', run_at = ?1, last_error = ?2, lease_owner = NULL, lease_expires_at = NULL
 WHERE id = ?3 AND state = 'leased' AND lease_owner = ?4

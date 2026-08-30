@@ -392,6 +392,10 @@ func (a *pgQuerier) PrevPositionBefore(ctx context.Context, arg sqlitegen.PrevPo
 	return r, err
 }
 
+func (a *pgQuerier) ReleaseJob(ctx context.Context, arg sqlitegen.ReleaseJobParams) error {
+	return a.q.ReleaseJob(ctx, pggen.ReleaseJobParams(arg))
+}
+
 func (a *pgQuerier) RemoveCardAssignee(ctx context.Context, arg sqlitegen.RemoveCardAssigneeParams) error {
 	return a.q.RemoveCardAssignee(ctx, pggen.RemoveCardAssigneeParams(arg))
 }

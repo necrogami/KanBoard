@@ -30,6 +30,16 @@ WHERE id = @id AND state = 'leased' AND lease_owner = @owner;
 UPDATE job SET state = 'dead', completed_at = @completed_at, last_error = @last_error, lease_owner = NULL, lease_expires_at = NULL
 WHERE id = @id AND state = 'leased' AND lease_owner = @owner;
 
+-- name: ReleaseJob :exec
+-- ReleaseJob puts a leased job back in the queue exactly as it was found:
+-- the same run_at and the same attempt count, undoing the increment
+-- LeaseJobs made. The runner uses it when its context is cancelled while
+-- a handler runs, so a shutdown neither burns an attempt nor leaves the
+-- row leased for the rest of the lease. Guarded by the lease owner; see
+-- CompleteJob.
+UPDATE job SET state = 'queued', run_at = @run_at, attempts = @attempts, lease_owner = NULL, lease_expires_at = NULL
+WHERE id = @id AND state = 'leased' AND lease_owner = @owner;
+
 -- name: CountQueuedJobs :one
 -- CountQueuedJobs reports how many jobs with this kind and payload are
 -- still waiting to run. An enqueuer whose job is idempotent in its

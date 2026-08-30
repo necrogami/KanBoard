@@ -528,6 +528,22 @@ func TestJobLifecycle(t *testing.T) {
 			t.Fatalf("LeaseJobs after retry = %d, %v", len(relaunched), err)
 		}
 
+		// ReleaseJob puts j2 back exactly as it was found, undoing the
+		// attempt LeaseJobs charged for the lease it now holds as w2.
+		if err := q.ReleaseJob(ctx, sqlitegen.ReleaseJobParams{ID: "j2", RunAt: 200, Attempts: 1, Owner: sql.NullString{String: "w2", Valid: true}}); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := q.GetJob(ctx, "j2"); err != nil || got.State != "queued" || got.RunAt != 200 || got.Attempts != 1 || got.LeaseOwner.Valid {
+			t.Fatalf("GetJob j2 after release = %+v, %v", got, err)
+		}
+		// A stale owner cannot release a job it no longer holds.
+		if err := q.ReleaseJob(ctx, sqlitegen.ReleaseJobParams{ID: "j3", RunAt: 1, Attempts: 0, Owner: sql.NullString{String: "someone-else", Valid: true}}); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := q.GetJob(ctx, "j3"); err != nil || got.State != "leased" {
+			t.Fatalf("GetJob j3 after foreign release = %+v, %v", got, err)
+		}
+
 		if err := q.DeadJob(ctx, sqlitegen.DeadJobParams{CompletedAt: sql.NullInt64{Int64: 9, Valid: true}, LastError: sql.NullString{String: "fatal", Valid: true}, ID: "j3", Owner: sql.NullString{String: "w1", Valid: true}}); err != nil {
 			t.Fatal(err)
 		}
@@ -641,6 +657,7 @@ var coveredQuerierMethods = map[string]bool{
 	"PrevPositionBefore":            true,
 	"RemoveCardAssignee":            true,
 	"RemoveCardLabel":               true,
+	"ReleaseJob":                    true,
 	"RetryJob":                      true,
 	"SetCardArchived":               true,
 	"TouchCard":                     true,

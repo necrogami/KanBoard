@@ -238,3 +238,48 @@ func TestStaleLeaseOwnerCannotClobberReclaimedJob(t *testing.T) {
 		}
 	})
 }
+
+// TestCancelledContextReleasesTheJob covers both halves of shutdown
+// bookkeeping: the state-transition write runs on a context the
+// cancellation does not reach, and the job goes back to the queue with
+// the run_at and attempt count it had before the lease, rather than
+// burning an attempt or sitting leased until the lease expires.
+func TestCancelledContextReleasesTheJob(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st *store.Store) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		fake := clock.NewFake(time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC))
+		runAt := fake.Now().Add(-time.Minute)
+		r := jobs.New(st, jobs.WithClock(fake), jobs.WithJitter(func() float64 { return 0 }))
+		r.Register("test.slow", func(context.Context, jobs.Job) error {
+			cancel() // the process is shutting down mid-handler
+			return errors.New("interrupted")
+		})
+		jid, err := jobs.Enqueue(ctx, st.Q(), fake.Now(), jobs.Spec{Kind: "test.slow", Payload: "p", RunAt: runAt})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, err := r.RunOnce(ctx); err != nil || n != 1 {
+			t.Fatalf("RunOnce = %d, %v", n, err)
+		}
+		got, err := st.Q().GetJob(context.Background(), jid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.State != "queued" {
+			t.Fatalf("state = %q, want queued", got.State)
+		}
+		if got.Attempts != 0 {
+			t.Fatalf("attempts = %d, want 0 (a shutdown must not burn one)", got.Attempts)
+		}
+		if got.RunAt != clock.Millis(runAt) {
+			t.Fatalf("run_at = %d, want %d (unchanged)", got.RunAt, clock.Millis(runAt))
+		}
+		if got.LeaseOwner.Valid || got.LeaseExpiresAt.Valid {
+			t.Fatalf("lease not released: %+v", got)
+		}
+		if got.LastError.Valid {
+			t.Fatalf("last_error = %q, want none", got.LastError.String)
+		}
+	})
+}

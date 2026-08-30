@@ -29,6 +29,11 @@ const (
 	backoffCap         = 4 * time.Hour
 	jitterFraction     = 0.25
 
+	// bookkeepingTimeout bounds the state-transition write that records a
+	// job's outcome. It runs on a context detached from the caller's, so
+	// it needs a deadline of its own.
+	bookkeepingTimeout = 5 * time.Second
+
 	// KindRankRebalance is an alias of jobkind.RankRebalance, kept so a
 	// handler registration reads in terms of this package. The constant
 	// itself lives in jobkind because the service enqueues it.
@@ -197,28 +202,44 @@ func (r *Runner) RunOnce(ctx context.Context) (int, error) {
 }
 
 func (r *Runner) runOne(ctx context.Context, row sqlitegen.Job) {
+	// LeaseJobs has already incremented attempts, so a bookkeeping write
+	// that fails leaves the row leased for the rest of the lease with the
+	// attempt spent. Record the outcome on a context that a shutdown does
+	// not cancel, with its own short deadline.
+	book, cancel := context.WithTimeout(context.WithoutCancel(ctx), bookkeepingTimeout)
+	defer cancel()
+
 	job := Job{ID: row.ID, WorkspaceID: row.WorkspaceID.String, Kind: row.Kind, Payload: row.Payload, Attempts: row.Attempts, MaxAttempts: row.MaxAttempts}
 	h, ok := r.handlers[row.Kind]
 	var err error
 	if !ok {
 		err = fmt.Errorf("no handler registered for kind %q", row.Kind)
-		r.dead(ctx, row.ID, err)
+		r.dead(book, row.ID, err)
 		return
 	}
 	err = r.safeCall(ctx, h, job)
+	if ctx.Err() != nil {
+		// The runner is shutting down. Whatever the handler returned, that
+		// is not the job failing: put it back exactly as it was found so
+		// the next runner picks it up immediately.
+		if e := r.st.Q().ReleaseJob(book, sqlitegen.ReleaseJobParams{ID: row.ID, RunAt: row.RunAt, Attempts: row.Attempts - 1, Owner: r.owner()}); e != nil {
+			r.log.Error("jobs: release", "id", row.ID, "err", e)
+		}
+		return
+	}
 	now := nullMs(r.clock.Now())
 	if err == nil {
-		if e := r.st.Q().CompleteJob(ctx, sqlitegen.CompleteJobParams{ID: row.ID, CompletedAt: now, Owner: r.owner()}); e != nil {
+		if e := r.st.Q().CompleteJob(book, sqlitegen.CompleteJobParams{ID: row.ID, CompletedAt: now, Owner: r.owner()}); e != nil {
 			r.log.Error("jobs: complete", "id", row.ID, "err", e)
 		}
 		return
 	}
 	if row.Attempts >= row.MaxAttempts {
-		r.dead(ctx, row.ID, err)
+		r.dead(book, row.ID, err)
 		return
 	}
 	next := r.clock.Now().Add(Backoff(row.Attempts, r.jitter()))
-	if e := r.st.Q().RetryJob(ctx, sqlitegen.RetryJobParams{ID: row.ID, RunAt: clock.Millis(next), LastError: sql.NullString{String: err.Error(), Valid: true}, Owner: r.owner()}); e != nil {
+	if e := r.st.Q().RetryJob(book, sqlitegen.RetryJobParams{ID: row.ID, RunAt: clock.Millis(next), LastError: sql.NullString{String: err.Error(), Valid: true}, Owner: r.owner()}); e != nil {
 		r.log.Error("jobs: retry", "id", row.ID, "err", e)
 	}
 	r.log.Warn("jobs: failed, will retry", "id", row.ID, "kind", row.Kind, "attempt", row.Attempts, "err", err)

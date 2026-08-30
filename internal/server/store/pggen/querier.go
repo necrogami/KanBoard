@@ -81,6 +81,13 @@ type Querier interface {
 	NextPositionAfter(ctx context.Context, arg NextPositionAfterParams) (string, error)
 	NextSeq(ctx context.Context, id string) (int64, error)
 	PrevPositionBefore(ctx context.Context, arg PrevPositionBeforeParams) (string, error)
+	// ReleaseJob puts a leased job back in the queue exactly as it was found:
+	// the same run_at and the same attempt count, undoing the increment
+	// LeaseJobs made. The runner uses it when its context is cancelled while
+	// a handler runs, so a shutdown neither burns an attempt nor leaves the
+	// row leased for the rest of the lease. Guarded by the lease owner; see
+	// CompleteJob.
+	ReleaseJob(ctx context.Context, arg ReleaseJobParams) error
 	RemoveCardAssignee(ctx context.Context, arg RemoveCardAssigneeParams) error
 	RemoveCardLabel(ctx context.Context, arg RemoveCardLabelParams) error
 	// RetryJob is guarded by the lease owner; see CompleteJob.
