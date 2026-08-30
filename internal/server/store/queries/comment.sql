@@ -4,4 +4,4 @@ VALUES (@id, @workspace_id, @card_id, @author_id, @body, @via_token_id, @created
 RETURNING *;
 
 -- name: ListComments :many
-SELECT * FROM comment WHERE card_id = @card_id AND deleted_at IS NULL ORDER BY created_at;
+SELECT * FROM comment WHERE card_id = @card_id AND workspace_id = @workspace_id AND deleted_at IS NULL ORDER BY created_at;

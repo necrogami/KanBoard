@@ -16,7 +16,7 @@ type Querier interface {
 	// reclaimed, must not clobber the new owner's outcome: the update matches
 	// no row instead. RetryJob and DeadJob carry the same guard.
 	CompleteJob(ctx context.Context, arg CompleteJobParams) error
-	CountCardsInColumn(ctx context.Context, columnID string) (int64, error)
+	CountCardsInColumn(ctx context.Context, arg CountCardsInColumnParams) (int64, error)
 	// CountQueuedJobs reports how many jobs with this kind and payload are
 	// still waiting to run. An enqueuer whose job is idempotent in its
 	// payload calls it inside its own transaction to skip a duplicate.
@@ -33,18 +33,18 @@ type Querier interface {
 	// DeadJob is guarded by the lease owner; see CompleteJob.
 	DeadJob(ctx context.Context, arg DeadJobParams) error
 	DeleteReceiptsBefore(ctx context.Context, before int64) (int64, error)
-	FirstPositionInColumn(ctx context.Context, columnID string) (string, error)
-	GetBoard(ctx context.Context, id string) (Board, error)
-	GetBoardByProject(ctx context.Context, projectID string) (Board, error)
-	GetCard(ctx context.Context, id string) (Card, error)
+	FirstPositionInColumn(ctx context.Context, arg FirstPositionInColumnParams) (string, error)
+	GetBoard(ctx context.Context, arg GetBoardParams) (Board, error)
+	GetBoardByProject(ctx context.Context, arg GetBoardByProjectParams) (Board, error)
+	GetCard(ctx context.Context, arg GetCardParams) (Card, error)
 	GetCardByNumber(ctx context.Context, arg GetCardByNumberParams) (Card, error)
-	GetColumn(ctx context.Context, id string) (BoardColumn, error)
+	GetColumn(ctx context.Context, arg GetColumnParams) (BoardColumn, error)
 	GetJob(ctx context.Context, id string) (Job, error)
-	GetLabel(ctx context.Context, id string) (Label, error)
-	GetProject(ctx context.Context, id string) (Project, error)
+	GetLabel(ctx context.Context, arg GetLabelParams) (Label, error)
+	GetProject(ctx context.Context, arg GetProjectParams) (Project, error)
 	GetProjectByKey(ctx context.Context, arg GetProjectByKeyParams) (Project, error)
 	GetReceipt(ctx context.Context, arg GetReceiptParams) (CommandReceipt, error)
-	GetUser(ctx context.Context, id string) (AppUser, error)
+	GetUser(ctx context.Context, arg GetUserParams) (AppUser, error)
 	GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) (AppUser, error)
 	GetWorkspace(ctx context.Context, id string) (Workspace, error)
 	GetWorkspaceBySlug(ctx context.Context, slug string) (Workspace, error)
@@ -52,26 +52,26 @@ type Querier interface {
 	InsertEvent(ctx context.Context, arg InsertEventParams) error
 	InsertJob(ctx context.Context, arg InsertJobParams) error
 	InsertReceipt(ctx context.Context, arg InsertReceiptParams) error
-	LastPositionInColumn(ctx context.Context, columnID string) (string, error)
+	LastPositionInColumn(ctx context.Context, arg LastPositionInColumnParams) (string, error)
 	LeaseJobs(ctx context.Context, arg LeaseJobsParams) ([]Job, error)
-	ListCardAssigneeIDs(ctx context.Context, cardID string) ([]string, error)
+	ListCardAssigneeIDs(ctx context.Context, arg ListCardAssigneeIDsParams) ([]string, error)
 	// ListCardAssigneeIDsByBoard is the batched form of ListCardAssigneeIDs
 	// for a whole board; see ListCardLabelIDsByBoard.
-	ListCardAssigneeIDsByBoard(ctx context.Context, boardID string) ([]ListCardAssigneeIDsByBoardRow, error)
-	ListCardLabelIDs(ctx context.Context, cardID string) ([]string, error)
+	ListCardAssigneeIDsByBoard(ctx context.Context, arg ListCardAssigneeIDsByBoardParams) ([]ListCardAssigneeIDsByBoardRow, error)
+	ListCardLabelIDs(ctx context.Context, arg ListCardLabelIDsParams) ([]string, error)
 	// ListCardLabelIDsByBoard is the batched form of ListCardLabelIDs for a
 	// whole board: one query instead of one per card, grouped by the caller.
-	ListCardLabelIDsByBoard(ctx context.Context, boardID string) ([]ListCardLabelIDsByBoardRow, error)
-	ListCardsByBoard(ctx context.Context, boardID string) ([]Card, error)
-	ListCardsByColumn(ctx context.Context, columnID string) ([]Card, error)
-	ListColumns(ctx context.Context, boardID string) ([]BoardColumn, error)
-	ListComments(ctx context.Context, cardID string) ([]Comment, error)
+	ListCardLabelIDsByBoard(ctx context.Context, arg ListCardLabelIDsByBoardParams) ([]ListCardLabelIDsByBoardRow, error)
+	ListCardsByBoard(ctx context.Context, arg ListCardsByBoardParams) ([]Card, error)
+	ListCardsByColumn(ctx context.Context, arg ListCardsByColumnParams) ([]Card, error)
+	ListColumns(ctx context.Context, arg ListColumnsParams) ([]BoardColumn, error)
+	ListComments(ctx context.Context, arg ListCommentsParams) ([]Comment, error)
 	ListEventsByCard(ctx context.Context, arg ListEventsByCardParams) ([]Event, error)
 	ListEventsSince(ctx context.Context, arg ListEventsSinceParams) ([]Event, error)
 	ListJobsByState(ctx context.Context, arg ListJobsByStateParams) ([]Job, error)
-	ListLabels(ctx context.Context, projectID string) ([]Label, error)
-	ListProjectMembers(ctx context.Context, projectID string) ([]ProjectMember, error)
-	ListProjectMembershipsForUser(ctx context.Context, userID string) ([]ProjectMember, error)
+	ListLabels(ctx context.Context, arg ListLabelsParams) ([]Label, error)
+	ListProjectMembers(ctx context.Context, arg ListProjectMembersParams) ([]ProjectMember, error)
+	ListProjectMembershipsForUser(ctx context.Context, arg ListProjectMembershipsForUserParams) ([]ProjectMember, error)
 	ListProjects(ctx context.Context, workspaceID string) ([]Project, error)
 	// Every versioned update carries "AND version = @version": on Postgres
 	// READ COMMITTED two transactions can both read version 1, so the check

@@ -11,11 +11,16 @@ import (
 )
 
 const countCardsInColumn = `-- name: CountCardsInColumn :one
-SELECT count(*) FROM card WHERE column_id = ?1 AND archived_at IS NULL
+SELECT count(*) FROM card WHERE column_id = ?1 AND workspace_id = ?2 AND archived_at IS NULL
 `
 
-func (q *Queries) CountCardsInColumn(ctx context.Context, columnID string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countCardsInColumn, columnID)
+type CountCardsInColumnParams struct {
+	ColumnID    string
+	WorkspaceID string
+}
+
+func (q *Queries) CountCardsInColumn(ctx context.Context, arg CountCardsInColumnParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countCardsInColumn, arg.ColumnID, arg.WorkspaceID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -89,22 +94,32 @@ func (q *Queries) CreateCard(ctx context.Context, arg CreateCardParams) (Card, e
 }
 
 const firstPositionInColumn = `-- name: FirstPositionInColumn :one
-SELECT position FROM card WHERE column_id = ?1 ORDER BY position ASC LIMIT 1
+SELECT position FROM card WHERE column_id = ?1 AND workspace_id = ?2 ORDER BY position ASC LIMIT 1
 `
 
-func (q *Queries) FirstPositionInColumn(ctx context.Context, columnID string) (string, error) {
-	row := q.db.QueryRowContext(ctx, firstPositionInColumn, columnID)
+type FirstPositionInColumnParams struct {
+	ColumnID    string
+	WorkspaceID string
+}
+
+func (q *Queries) FirstPositionInColumn(ctx context.Context, arg FirstPositionInColumnParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, firstPositionInColumn, arg.ColumnID, arg.WorkspaceID)
 	var position string
 	err := row.Scan(&position)
 	return position, err
 }
 
 const getCard = `-- name: GetCard :one
-SELECT id, workspace_id, project_id, board_id, column_id, number, title, description, position, due_date, created_by, completed_at, archived_at, version, type_id, parent_id, priority, estimate, start_date, resolution, iteration_id, created_at, updated_at FROM card WHERE id = ?1
+SELECT id, workspace_id, project_id, board_id, column_id, number, title, description, position, due_date, created_by, completed_at, archived_at, version, type_id, parent_id, priority, estimate, start_date, resolution, iteration_id, created_at, updated_at FROM card WHERE id = ?1 AND workspace_id = ?2
 `
 
-func (q *Queries) GetCard(ctx context.Context, id string) (Card, error) {
-	row := q.db.QueryRowContext(ctx, getCard, id)
+type GetCardParams struct {
+	ID          string
+	WorkspaceID string
+}
+
+func (q *Queries) GetCard(ctx context.Context, arg GetCardParams) (Card, error) {
+	row := q.db.QueryRowContext(ctx, getCard, arg.ID, arg.WorkspaceID)
 	var i Card
 	err := row.Scan(
 		&i.ID,
@@ -135,16 +150,17 @@ func (q *Queries) GetCard(ctx context.Context, id string) (Card, error) {
 }
 
 const getCardByNumber = `-- name: GetCardByNumber :one
-SELECT id, workspace_id, project_id, board_id, column_id, number, title, description, position, due_date, created_by, completed_at, archived_at, version, type_id, parent_id, priority, estimate, start_date, resolution, iteration_id, created_at, updated_at FROM card WHERE project_id = ?1 AND number = ?2
+SELECT id, workspace_id, project_id, board_id, column_id, number, title, description, position, due_date, created_by, completed_at, archived_at, version, type_id, parent_id, priority, estimate, start_date, resolution, iteration_id, created_at, updated_at FROM card WHERE project_id = ?1 AND workspace_id = ?2 AND number = ?3
 `
 
 type GetCardByNumberParams struct {
-	ProjectID string
-	Number    int64
+	ProjectID   string
+	WorkspaceID string
+	Number      int64
 }
 
 func (q *Queries) GetCardByNumber(ctx context.Context, arg GetCardByNumberParams) (Card, error) {
-	row := q.db.QueryRowContext(ctx, getCardByNumber, arg.ProjectID, arg.Number)
+	row := q.db.QueryRowContext(ctx, getCardByNumber, arg.ProjectID, arg.WorkspaceID, arg.Number)
 	var i Card
 	err := row.Scan(
 		&i.ID,
@@ -175,22 +191,32 @@ func (q *Queries) GetCardByNumber(ctx context.Context, arg GetCardByNumberParams
 }
 
 const lastPositionInColumn = `-- name: LastPositionInColumn :one
-SELECT position FROM card WHERE column_id = ?1 ORDER BY position DESC LIMIT 1
+SELECT position FROM card WHERE column_id = ?1 AND workspace_id = ?2 ORDER BY position DESC LIMIT 1
 `
 
-func (q *Queries) LastPositionInColumn(ctx context.Context, columnID string) (string, error) {
-	row := q.db.QueryRowContext(ctx, lastPositionInColumn, columnID)
+type LastPositionInColumnParams struct {
+	ColumnID    string
+	WorkspaceID string
+}
+
+func (q *Queries) LastPositionInColumn(ctx context.Context, arg LastPositionInColumnParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, lastPositionInColumn, arg.ColumnID, arg.WorkspaceID)
 	var position string
 	err := row.Scan(&position)
 	return position, err
 }
 
 const listCardsByBoard = `-- name: ListCardsByBoard :many
-SELECT id, workspace_id, project_id, board_id, column_id, number, title, description, position, due_date, created_by, completed_at, archived_at, version, type_id, parent_id, priority, estimate, start_date, resolution, iteration_id, created_at, updated_at FROM card WHERE board_id = ?1 AND archived_at IS NULL ORDER BY column_id, position
+SELECT id, workspace_id, project_id, board_id, column_id, number, title, description, position, due_date, created_by, completed_at, archived_at, version, type_id, parent_id, priority, estimate, start_date, resolution, iteration_id, created_at, updated_at FROM card WHERE board_id = ?1 AND workspace_id = ?2 AND archived_at IS NULL ORDER BY column_id, position
 `
 
-func (q *Queries) ListCardsByBoard(ctx context.Context, boardID string) ([]Card, error) {
-	rows, err := q.db.QueryContext(ctx, listCardsByBoard, boardID)
+type ListCardsByBoardParams struct {
+	BoardID     string
+	WorkspaceID string
+}
+
+func (q *Queries) ListCardsByBoard(ctx context.Context, arg ListCardsByBoardParams) ([]Card, error) {
+	rows, err := q.db.QueryContext(ctx, listCardsByBoard, arg.BoardID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -237,11 +263,16 @@ func (q *Queries) ListCardsByBoard(ctx context.Context, boardID string) ([]Card,
 }
 
 const listCardsByColumn = `-- name: ListCardsByColumn :many
-SELECT id, workspace_id, project_id, board_id, column_id, number, title, description, position, due_date, created_by, completed_at, archived_at, version, type_id, parent_id, priority, estimate, start_date, resolution, iteration_id, created_at, updated_at FROM card WHERE column_id = ?1 AND archived_at IS NULL ORDER BY position
+SELECT id, workspace_id, project_id, board_id, column_id, number, title, description, position, due_date, created_by, completed_at, archived_at, version, type_id, parent_id, priority, estimate, start_date, resolution, iteration_id, created_at, updated_at FROM card WHERE column_id = ?1 AND workspace_id = ?2 AND archived_at IS NULL ORDER BY position
 `
 
-func (q *Queries) ListCardsByColumn(ctx context.Context, columnID string) ([]Card, error) {
-	rows, err := q.db.QueryContext(ctx, listCardsByColumn, columnID)
+type ListCardsByColumnParams struct {
+	ColumnID    string
+	WorkspaceID string
+}
+
+func (q *Queries) ListCardsByColumn(ctx context.Context, arg ListCardsByColumnParams) ([]Card, error) {
+	rows, err := q.db.QueryContext(ctx, listCardsByColumn, arg.ColumnID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -290,7 +321,7 @@ func (q *Queries) ListCardsByColumn(ctx context.Context, columnID string) ([]Car
 const moveCard = `-- name: MoveCard :one
 
 UPDATE card SET column_id = ?1, position = ?2, completed_at = ?3, version = version + 1, updated_at = ?4
-WHERE id = ?5 AND version = ?6 RETURNING id, workspace_id, project_id, board_id, column_id, number, title, description, position, due_date, created_by, completed_at, archived_at, version, type_id, parent_id, priority, estimate, start_date, resolution, iteration_id, created_at, updated_at
+WHERE id = ?5 AND workspace_id = ?6 AND version = ?7 RETURNING id, workspace_id, project_id, board_id, column_id, number, title, description, position, due_date, created_by, completed_at, archived_at, version, type_id, parent_id, priority, estimate, start_date, resolution, iteration_id, created_at, updated_at
 `
 
 type MoveCardParams struct {
@@ -299,6 +330,7 @@ type MoveCardParams struct {
 	CompletedAt sql.NullInt64
 	UpdatedAt   int64
 	ID          string
+	WorkspaceID string
 	Version     int64
 }
 
@@ -312,6 +344,7 @@ func (q *Queries) MoveCard(ctx context.Context, arg MoveCardParams) (Card, error
 		arg.CompletedAt,
 		arg.UpdatedAt,
 		arg.ID,
+		arg.WorkspaceID,
 		arg.Version,
 	)
 	var i Card
@@ -344,32 +377,34 @@ func (q *Queries) MoveCard(ctx context.Context, arg MoveCardParams) (Card, error
 }
 
 const nextPositionAfter = `-- name: NextPositionAfter :one
-SELECT position FROM card WHERE column_id = ?1 AND position > ?2 ORDER BY position ASC LIMIT 1
+SELECT position FROM card WHERE column_id = ?1 AND workspace_id = ?2 AND position > ?3 ORDER BY position ASC LIMIT 1
 `
 
 type NextPositionAfterParams struct {
-	ColumnID string
-	Position string
+	ColumnID    string
+	WorkspaceID string
+	Position    string
 }
 
 func (q *Queries) NextPositionAfter(ctx context.Context, arg NextPositionAfterParams) (string, error) {
-	row := q.db.QueryRowContext(ctx, nextPositionAfter, arg.ColumnID, arg.Position)
+	row := q.db.QueryRowContext(ctx, nextPositionAfter, arg.ColumnID, arg.WorkspaceID, arg.Position)
 	var position string
 	err := row.Scan(&position)
 	return position, err
 }
 
 const prevPositionBefore = `-- name: PrevPositionBefore :one
-SELECT position FROM card WHERE column_id = ?1 AND position < ?2 ORDER BY position DESC LIMIT 1
+SELECT position FROM card WHERE column_id = ?1 AND workspace_id = ?2 AND position < ?3 ORDER BY position DESC LIMIT 1
 `
 
 type PrevPositionBeforeParams struct {
-	ColumnID string
-	Position string
+	ColumnID    string
+	WorkspaceID string
+	Position    string
 }
 
 func (q *Queries) PrevPositionBefore(ctx context.Context, arg PrevPositionBeforeParams) (string, error) {
-	row := q.db.QueryRowContext(ctx, prevPositionBefore, arg.ColumnID, arg.Position)
+	row := q.db.QueryRowContext(ctx, prevPositionBefore, arg.ColumnID, arg.WorkspaceID, arg.Position)
 	var position string
 	err := row.Scan(&position)
 	return position, err
@@ -377,14 +412,15 @@ func (q *Queries) PrevPositionBefore(ctx context.Context, arg PrevPositionBefore
 
 const setCardArchived = `-- name: SetCardArchived :one
 UPDATE card SET archived_at = ?1, version = version + 1, updated_at = ?2
-WHERE id = ?3 AND version = ?4 RETURNING id, workspace_id, project_id, board_id, column_id, number, title, description, position, due_date, created_by, completed_at, archived_at, version, type_id, parent_id, priority, estimate, start_date, resolution, iteration_id, created_at, updated_at
+WHERE id = ?3 AND workspace_id = ?4 AND version = ?5 RETURNING id, workspace_id, project_id, board_id, column_id, number, title, description, position, due_date, created_by, completed_at, archived_at, version, type_id, parent_id, priority, estimate, start_date, resolution, iteration_id, created_at, updated_at
 `
 
 type SetCardArchivedParams struct {
-	ArchivedAt sql.NullInt64
-	UpdatedAt  int64
-	ID         string
-	Version    int64
+	ArchivedAt  sql.NullInt64
+	UpdatedAt   int64
+	ID          string
+	WorkspaceID string
+	Version     int64
 }
 
 func (q *Queries) SetCardArchived(ctx context.Context, arg SetCardArchivedParams) (Card, error) {
@@ -392,6 +428,7 @@ func (q *Queries) SetCardArchived(ctx context.Context, arg SetCardArchivedParams
 		arg.ArchivedAt,
 		arg.UpdatedAt,
 		arg.ID,
+		arg.WorkspaceID,
 		arg.Version,
 	)
 	var i Card
@@ -425,17 +462,23 @@ func (q *Queries) SetCardArchived(ctx context.Context, arg SetCardArchivedParams
 
 const touchCard = `-- name: TouchCard :one
 UPDATE card SET version = version + 1, updated_at = ?1
-WHERE id = ?2 AND version = ?3 RETURNING id, workspace_id, project_id, board_id, column_id, number, title, description, position, due_date, created_by, completed_at, archived_at, version, type_id, parent_id, priority, estimate, start_date, resolution, iteration_id, created_at, updated_at
+WHERE id = ?2 AND workspace_id = ?3 AND version = ?4 RETURNING id, workspace_id, project_id, board_id, column_id, number, title, description, position, due_date, created_by, completed_at, archived_at, version, type_id, parent_id, priority, estimate, start_date, resolution, iteration_id, created_at, updated_at
 `
 
 type TouchCardParams struct {
-	UpdatedAt int64
-	ID        string
-	Version   int64
+	UpdatedAt   int64
+	ID          string
+	WorkspaceID string
+	Version     int64
 }
 
 func (q *Queries) TouchCard(ctx context.Context, arg TouchCardParams) (Card, error) {
-	row := q.db.QueryRowContext(ctx, touchCard, arg.UpdatedAt, arg.ID, arg.Version)
+	row := q.db.QueryRowContext(ctx, touchCard,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.Version,
+	)
 	var i Card
 	err := row.Scan(
 		&i.ID,
@@ -467,7 +510,7 @@ func (q *Queries) TouchCard(ctx context.Context, arg TouchCardParams) (Card, err
 
 const updateCardFields = `-- name: UpdateCardFields :one
 UPDATE card SET title = ?1, description = ?2, due_date = ?3, version = version + 1, updated_at = ?4
-WHERE id = ?5 AND version = ?6 RETURNING id, workspace_id, project_id, board_id, column_id, number, title, description, position, due_date, created_by, completed_at, archived_at, version, type_id, parent_id, priority, estimate, start_date, resolution, iteration_id, created_at, updated_at
+WHERE id = ?5 AND workspace_id = ?6 AND version = ?7 RETURNING id, workspace_id, project_id, board_id, column_id, number, title, description, position, due_date, created_by, completed_at, archived_at, version, type_id, parent_id, priority, estimate, start_date, resolution, iteration_id, created_at, updated_at
 `
 
 type UpdateCardFieldsParams struct {
@@ -476,6 +519,7 @@ type UpdateCardFieldsParams struct {
 	DueDate     sql.NullInt64
 	UpdatedAt   int64
 	ID          string
+	WorkspaceID string
 	Version     int64
 }
 
@@ -486,6 +530,7 @@ func (q *Queries) UpdateCardFields(ctx context.Context, arg UpdateCardFieldsPara
 		arg.DueDate,
 		arg.UpdatedAt,
 		arg.ID,
+		arg.WorkspaceID,
 		arg.Version,
 	)
 	var i Card

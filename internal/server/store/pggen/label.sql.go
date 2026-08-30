@@ -80,11 +80,16 @@ func (q *Queries) CreateLabel(ctx context.Context, arg CreateLabelParams) (Label
 }
 
 const getLabel = `-- name: GetLabel :one
-SELECT id, workspace_id, project_id, name, color, kind, created_at, updated_at FROM label WHERE id = $1
+SELECT id, workspace_id, project_id, name, color, kind, created_at, updated_at FROM label WHERE id = $1 AND workspace_id = $2
 `
 
-func (q *Queries) GetLabel(ctx context.Context, id string) (Label, error) {
-	row := q.db.QueryRowContext(ctx, getLabel, id)
+type GetLabelParams struct {
+	ID          string
+	WorkspaceID string
+}
+
+func (q *Queries) GetLabel(ctx context.Context, arg GetLabelParams) (Label, error) {
+	row := q.db.QueryRowContext(ctx, getLabel, arg.ID, arg.WorkspaceID)
 	var i Label
 	err := row.Scan(
 		&i.ID,
@@ -100,11 +105,16 @@ func (q *Queries) GetLabel(ctx context.Context, id string) (Label, error) {
 }
 
 const listCardAssigneeIDs = `-- name: ListCardAssigneeIDs :many
-SELECT user_id FROM card_assignee WHERE card_id = $1
+SELECT user_id FROM card_assignee WHERE card_id = $1 AND workspace_id = $2
 `
 
-func (q *Queries) ListCardAssigneeIDs(ctx context.Context, cardID string) ([]string, error) {
-	rows, err := q.db.QueryContext(ctx, listCardAssigneeIDs, cardID)
+type ListCardAssigneeIDsParams struct {
+	CardID      string
+	WorkspaceID string
+}
+
+func (q *Queries) ListCardAssigneeIDs(ctx context.Context, arg ListCardAssigneeIDsParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listCardAssigneeIDs, arg.CardID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -129,8 +139,13 @@ func (q *Queries) ListCardAssigneeIDs(ctx context.Context, cardID string) ([]str
 const listCardAssigneeIDsByBoard = `-- name: ListCardAssigneeIDsByBoard :many
 SELECT ca.card_id, ca.user_id FROM card_assignee AS ca
 JOIN card AS c ON c.id = ca.card_id
-WHERE c.board_id = $1 AND c.archived_at IS NULL
+WHERE c.board_id = $1 AND ca.workspace_id = $2 AND c.archived_at IS NULL
 `
+
+type ListCardAssigneeIDsByBoardParams struct {
+	BoardID     string
+	WorkspaceID string
+}
 
 type ListCardAssigneeIDsByBoardRow struct {
 	CardID string
@@ -139,8 +154,8 @@ type ListCardAssigneeIDsByBoardRow struct {
 
 // ListCardAssigneeIDsByBoard is the batched form of ListCardAssigneeIDs
 // for a whole board; see ListCardLabelIDsByBoard.
-func (q *Queries) ListCardAssigneeIDsByBoard(ctx context.Context, boardID string) ([]ListCardAssigneeIDsByBoardRow, error) {
-	rows, err := q.db.QueryContext(ctx, listCardAssigneeIDsByBoard, boardID)
+func (q *Queries) ListCardAssigneeIDsByBoard(ctx context.Context, arg ListCardAssigneeIDsByBoardParams) ([]ListCardAssigneeIDsByBoardRow, error) {
+	rows, err := q.db.QueryContext(ctx, listCardAssigneeIDsByBoard, arg.BoardID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -163,11 +178,16 @@ func (q *Queries) ListCardAssigneeIDsByBoard(ctx context.Context, boardID string
 }
 
 const listCardLabelIDs = `-- name: ListCardLabelIDs :many
-SELECT label_id FROM card_label WHERE card_id = $1
+SELECT label_id FROM card_label WHERE card_id = $1 AND workspace_id = $2
 `
 
-func (q *Queries) ListCardLabelIDs(ctx context.Context, cardID string) ([]string, error) {
-	rows, err := q.db.QueryContext(ctx, listCardLabelIDs, cardID)
+type ListCardLabelIDsParams struct {
+	CardID      string
+	WorkspaceID string
+}
+
+func (q *Queries) ListCardLabelIDs(ctx context.Context, arg ListCardLabelIDsParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listCardLabelIDs, arg.CardID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -192,8 +212,13 @@ func (q *Queries) ListCardLabelIDs(ctx context.Context, cardID string) ([]string
 const listCardLabelIDsByBoard = `-- name: ListCardLabelIDsByBoard :many
 SELECT cl.card_id, cl.label_id FROM card_label AS cl
 JOIN card AS c ON c.id = cl.card_id
-WHERE c.board_id = $1 AND c.archived_at IS NULL
+WHERE c.board_id = $1 AND cl.workspace_id = $2 AND c.archived_at IS NULL
 `
+
+type ListCardLabelIDsByBoardParams struct {
+	BoardID     string
+	WorkspaceID string
+}
 
 type ListCardLabelIDsByBoardRow struct {
 	CardID  string
@@ -202,8 +227,8 @@ type ListCardLabelIDsByBoardRow struct {
 
 // ListCardLabelIDsByBoard is the batched form of ListCardLabelIDs for a
 // whole board: one query instead of one per card, grouped by the caller.
-func (q *Queries) ListCardLabelIDsByBoard(ctx context.Context, boardID string) ([]ListCardLabelIDsByBoardRow, error) {
-	rows, err := q.db.QueryContext(ctx, listCardLabelIDsByBoard, boardID)
+func (q *Queries) ListCardLabelIDsByBoard(ctx context.Context, arg ListCardLabelIDsByBoardParams) ([]ListCardLabelIDsByBoardRow, error) {
+	rows, err := q.db.QueryContext(ctx, listCardLabelIDsByBoard, arg.BoardID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -226,11 +251,16 @@ func (q *Queries) ListCardLabelIDsByBoard(ctx context.Context, boardID string) (
 }
 
 const listLabels = `-- name: ListLabels :many
-SELECT id, workspace_id, project_id, name, color, kind, created_at, updated_at FROM label WHERE project_id = $1 ORDER BY name
+SELECT id, workspace_id, project_id, name, color, kind, created_at, updated_at FROM label WHERE project_id = $1 AND workspace_id = $2 ORDER BY name
 `
 
-func (q *Queries) ListLabels(ctx context.Context, projectID string) ([]Label, error) {
-	rows, err := q.db.QueryContext(ctx, listLabels, projectID)
+type ListLabelsParams struct {
+	ProjectID   string
+	WorkspaceID string
+}
+
+func (q *Queries) ListLabels(ctx context.Context, arg ListLabelsParams) ([]Label, error) {
+	rows, err := q.db.QueryContext(ctx, listLabels, arg.ProjectID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -262,29 +292,31 @@ func (q *Queries) ListLabels(ctx context.Context, projectID string) ([]Label, er
 }
 
 const removeCardAssignee = `-- name: RemoveCardAssignee :exec
-DELETE FROM card_assignee WHERE card_id = $1 AND user_id = $2
+DELETE FROM card_assignee WHERE card_id = $1 AND workspace_id = $2 AND user_id = $3
 `
 
 type RemoveCardAssigneeParams struct {
-	CardID string
-	UserID string
+	CardID      string
+	WorkspaceID string
+	UserID      string
 }
 
 func (q *Queries) RemoveCardAssignee(ctx context.Context, arg RemoveCardAssigneeParams) error {
-	_, err := q.db.ExecContext(ctx, removeCardAssignee, arg.CardID, arg.UserID)
+	_, err := q.db.ExecContext(ctx, removeCardAssignee, arg.CardID, arg.WorkspaceID, arg.UserID)
 	return err
 }
 
 const removeCardLabel = `-- name: RemoveCardLabel :exec
-DELETE FROM card_label WHERE card_id = $1 AND label_id = $2
+DELETE FROM card_label WHERE card_id = $1 AND workspace_id = $2 AND label_id = $3
 `
 
 type RemoveCardLabelParams struct {
-	CardID  string
-	LabelID string
+	CardID      string
+	WorkspaceID string
+	LabelID     string
 }
 
 func (q *Queries) RemoveCardLabel(ctx context.Context, arg RemoveCardLabelParams) error {
-	_, err := q.db.ExecContext(ctx, removeCardLabel, arg.CardID, arg.LabelID)
+	_, err := q.db.ExecContext(ctx, removeCardLabel, arg.CardID, arg.WorkspaceID, arg.LabelID)
 	return err
 }

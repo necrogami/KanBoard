@@ -49,16 +49,17 @@ func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) error 
 }
 
 const listEventsByCard = `-- name: ListEventsByCard :many
-SELECT id, workspace_id, project_id, board_id, card_id, seq, actor_user_id, via_token_id, actor_kind, kind, payload, occurred_at FROM event WHERE card_id = $1 ORDER BY seq DESC LIMIT CAST($2 AS BIGINT)
+SELECT id, workspace_id, project_id, board_id, card_id, seq, actor_user_id, via_token_id, actor_kind, kind, payload, occurred_at FROM event WHERE card_id = $1 AND workspace_id = $2 ORDER BY seq DESC LIMIT CAST($3 AS BIGINT)
 `
 
 type ListEventsByCardParams struct {
-	CardID sql.NullString
-	Lim    int64
+	CardID      sql.NullString
+	WorkspaceID string
+	Lim         int64
 }
 
 func (q *Queries) ListEventsByCard(ctx context.Context, arg ListEventsByCardParams) ([]Event, error) {
-	rows, err := q.db.QueryContext(ctx, listEventsByCard, arg.CardID, arg.Lim)
+	rows, err := q.db.QueryContext(ctx, listEventsByCard, arg.CardID, arg.WorkspaceID, arg.Lim)
 	if err != nil {
 		return nil, err
 	}

@@ -4,7 +4,7 @@ VALUES (@id, @workspace_id, @email, @name, @kind, @password_hash, @email_verifie
 RETURNING *;
 
 -- name: GetUser :one
-SELECT * FROM app_user WHERE id = @id;
+SELECT * FROM app_user WHERE id = @id AND workspace_id = @workspace_id;
 
 -- name: GetUserByEmail :one
 SELECT * FROM app_user WHERE workspace_id = @workspace_id AND email = @email;

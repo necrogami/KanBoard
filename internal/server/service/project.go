@@ -116,14 +116,14 @@ func (s *Service) GetBoard(ctx context.Context, actor policy.Actor, projectKey s
 	if err != nil {
 		return Board{}, nil, err
 	}
-	b, err := q.GetBoardByProject(ctx, p.ID)
+	b, err := q.GetBoardByProject(ctx, sqlitegen.GetBoardByProjectParams{ProjectID: p.ID, WorkspaceID: actor.WorkspaceID})
 	if err != nil {
 		return Board{}, nil, err
 	}
 	if !policy.Can(actor, policy.ProjectRead, policy.Resource{ProjectID: p.ID, BoardID: b.ID}) {
 		return Board{}, nil, forbidden()
 	}
-	cols, err := q.ListColumns(ctx, b.ID)
+	cols, err := q.ListColumns(ctx, sqlitegen.ListColumnsParams{BoardID: b.ID, WorkspaceID: actor.WorkspaceID})
 	if err != nil {
 		return Board{}, nil, err
 	}
@@ -131,13 +131,13 @@ func (s *Service) GetBoard(ctx context.Context, actor policy.Actor, projectKey s
 	for _, c := range cols {
 		out.Columns = append(out.Columns, columnDTO(c))
 	}
-	rows, err := q.ListCardsByBoard(ctx, b.ID)
+	rows, err := q.ListCardsByBoard(ctx, sqlitegen.ListCardsByBoardParams{BoardID: b.ID, WorkspaceID: actor.WorkspaceID})
 	if err != nil {
 		return Board{}, nil, err
 	}
 	// Two board-scoped queries rather than a pair per card: a 2000 card
 	// board is the spec 12.5 baseline and was 4001 queries.
-	labelRows, err := q.ListCardLabelIDsByBoard(ctx, b.ID)
+	labelRows, err := q.ListCardLabelIDsByBoard(ctx, sqlitegen.ListCardLabelIDsByBoardParams{BoardID: b.ID, WorkspaceID: actor.WorkspaceID})
 	if err != nil {
 		return Board{}, nil, err
 	}
@@ -145,7 +145,7 @@ func (s *Service) GetBoard(ctx context.Context, actor policy.Actor, projectKey s
 	for _, r := range labelRows {
 		labels[r.CardID] = append(labels[r.CardID], r.LabelID)
 	}
-	assigneeRows, err := q.ListCardAssigneeIDsByBoard(ctx, b.ID)
+	assigneeRows, err := q.ListCardAssigneeIDsByBoard(ctx, sqlitegen.ListCardAssigneeIDsByBoardParams{BoardID: b.ID, WorkspaceID: actor.WorkspaceID})
 	if err != nil {
 		return Board{}, nil, err
 	}

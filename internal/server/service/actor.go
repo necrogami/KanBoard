@@ -18,7 +18,7 @@ type TokenInfo struct {
 // through a token. Disabled or deleted users are forbidden.
 func (s *Service) LoadActor(ctx context.Context, workspaceID, userID string, tok *TokenInfo) (policy.Actor, error) {
 	q := s.st.Q()
-	u, err := q.GetUser(ctx, userID)
+	u, err := q.GetUser(ctx, sqlitegen.GetUserParams{ID: userID, WorkspaceID: workspaceID})
 	if isNoRows(err) {
 		return policy.Actor{}, forbidden()
 	}
@@ -35,7 +35,7 @@ func (s *Service) LoadActor(ctx context.Context, workspaceID, userID string, tok
 	} else if !isNoRows(err) {
 		return policy.Actor{}, err
 	}
-	pms, err := q.ListProjectMembershipsForUser(ctx, userID)
+	pms, err := q.ListProjectMembershipsForUser(ctx, sqlitegen.ListProjectMembershipsForUserParams{UserID: userID, WorkspaceID: workspaceID})
 	if err != nil {
 		return policy.Actor{}, err
 	}

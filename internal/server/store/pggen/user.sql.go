@@ -62,11 +62,16 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (AppUser
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, workspace_id, email, name, kind, password_hash, email_verified_at, locale, disabled_at, deleted_at, anonymized_at, created_at, updated_at FROM app_user WHERE id = $1
+SELECT id, workspace_id, email, name, kind, password_hash, email_verified_at, locale, disabled_at, deleted_at, anonymized_at, created_at, updated_at FROM app_user WHERE id = $1 AND workspace_id = $2
 `
 
-func (q *Queries) GetUser(ctx context.Context, id string) (AppUser, error) {
-	row := q.db.QueryRowContext(ctx, getUser, id)
+type GetUserParams struct {
+	ID          string
+	WorkspaceID string
+}
+
+func (q *Queries) GetUser(ctx context.Context, arg GetUserParams) (AppUser, error) {
+	row := q.db.QueryRowContext(ctx, getUser, arg.ID, arg.WorkspaceID)
 	var i AppUser
 	err := row.Scan(
 		&i.ID,

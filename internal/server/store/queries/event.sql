@@ -6,4 +6,4 @@ VALUES (@id, @workspace_id, @project_id, @board_id, @card_id, @seq, @actor_user_
 SELECT * FROM event WHERE workspace_id = @workspace_id AND seq > @seq ORDER BY seq LIMIT CAST(@lim AS BIGINT);
 
 -- name: ListEventsByCard :many
-SELECT * FROM event WHERE card_id = @card_id ORDER BY seq DESC LIMIT CAST(@lim AS BIGINT);
+SELECT * FROM event WHERE card_id = @card_id AND workspace_id = @workspace_id ORDER BY seq DESC LIMIT CAST(@lim AS BIGINT);

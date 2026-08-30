@@ -17,8 +17,8 @@ func (s *Service) CreateLabel(ctx context.Context, actor policy.Actor, cmd comma
 	}
 	var out Label
 	err := s.run(ctx, actor, cmd.Meta, "CreateLabel", &out, func(tx *Tx) error {
-		p, err := tx.Q.GetProject(tx.ctx, cmd.ProjectID)
-		if isNoRows(err) || (err == nil && p.WorkspaceID != actor.WorkspaceID) {
+		p, err := tx.Q.GetProject(tx.ctx, sqlitegen.GetProjectParams{ID: cmd.ProjectID, WorkspaceID: actor.WorkspaceID})
+		if isNoRows(err) {
 			return notFound("project")
 		}
 		if err != nil {
@@ -27,7 +27,7 @@ func (s *Service) CreateLabel(ctx context.Context, actor policy.Actor, cmd comma
 		// The board is resolved before the policy call so a board-restricted
 		// token is judged against the board it is scoped to; with an empty
 		// Resource.BoardID such a token can never create a label at all.
-		b, err := tx.Q.GetBoardByProject(tx.ctx, p.ID)
+		b, err := tx.Q.GetBoardByProject(tx.ctx, sqlitegen.GetBoardByProjectParams{ProjectID: p.ID, WorkspaceID: actor.WorkspaceID})
 		if err != nil {
 			return err
 		}
@@ -102,7 +102,7 @@ func (s *Service) SetCardLabels(ctx context.Context, actor policy.Actor, cmd com
 		}
 		names := map[string]string{}
 		for _, id := range cmd.LabelIDs {
-			l, err := tx.Q.GetLabel(tx.ctx, id)
+			l, err := tx.Q.GetLabel(tx.ctx, sqlitegen.GetLabelParams{ID: id, WorkspaceID: actor.WorkspaceID})
 			if isNoRows(err) || (err == nil && l.ProjectID != p.ID) {
 				return validation(errors.New("label " + id + " is not in this project"))
 			}
@@ -111,7 +111,7 @@ func (s *Service) SetCardLabels(ctx context.Context, actor policy.Actor, cmd com
 			}
 			names[id] = l.Name
 		}
-		current, err := tx.Q.ListCardLabelIDs(tx.ctx, c.ID)
+		current, err := tx.Q.ListCardLabelIDs(tx.ctx, sqlitegen.ListCardLabelIDsParams{CardID: c.ID, WorkspaceID: actor.WorkspaceID})
 		if err != nil {
 			return err
 		}
@@ -126,7 +126,7 @@ func (s *Service) SetCardLabels(ctx context.Context, actor policy.Actor, cmd com
 			}
 		}
 		for _, id := range remove {
-			if err := tx.Q.RemoveCardLabel(tx.ctx, sqlitegen.RemoveCardLabelParams{CardID: c.ID, LabelID: id}); err != nil {
+			if err := tx.Q.RemoveCardLabel(tx.ctx, sqlitegen.RemoveCardLabelParams{CardID: c.ID, WorkspaceID: actor.WorkspaceID, LabelID: id}); err != nil {
 				return err
 			}
 			if err := tx.emit(events.LabelRemoved, sc, events.LabelPayload{LabelID: id}); err != nil {
@@ -136,7 +136,7 @@ func (s *Service) SetCardLabels(ctx context.Context, actor policy.Actor, cmd com
 		if len(add)+len(remove) > 0 {
 			// Label edits are versioned card edits (the MCP card_update tool
 			// carries labels), so the card version moves with them.
-			touchedRow, err := tx.Q.TouchCard(tx.ctx, sqlitegen.TouchCardParams{ID: c.ID, Version: c.Version, UpdatedAt: tx.NowMs})
+			touchedRow, err := tx.Q.TouchCard(tx.ctx, sqlitegen.TouchCardParams{ID: c.ID, WorkspaceID: actor.WorkspaceID, Version: c.Version, UpdatedAt: tx.NowMs})
 			c, err = tx.versioned(c.ID, touchedRow, err)
 			if err != nil {
 				return err
@@ -166,7 +166,7 @@ func (s *Service) SetAssignees(ctx context.Context, actor policy.Actor, cmd comm
 		if err := tx.checkVersion(c.Version); err != nil {
 			return err
 		}
-		members, err := tx.Q.ListProjectMembers(tx.ctx, p.ID)
+		members, err := tx.Q.ListProjectMembers(tx.ctx, sqlitegen.ListProjectMembersParams{ProjectID: p.ID, WorkspaceID: actor.WorkspaceID})
 		if err != nil {
 			return err
 		}
@@ -179,7 +179,7 @@ func (s *Service) SetAssignees(ctx context.Context, actor policy.Actor, cmd comm
 				return validation(errors.New("user " + uid + " is not a project member"))
 			}
 		}
-		current, err := tx.Q.ListCardAssigneeIDs(tx.ctx, c.ID)
+		current, err := tx.Q.ListCardAssigneeIDs(tx.ctx, sqlitegen.ListCardAssigneeIDsParams{CardID: c.ID, WorkspaceID: actor.WorkspaceID})
 		if err != nil {
 			return err
 		}
@@ -194,7 +194,7 @@ func (s *Service) SetAssignees(ctx context.Context, actor policy.Actor, cmd comm
 			}
 		}
 		for _, uid := range remove {
-			if err := tx.Q.RemoveCardAssignee(tx.ctx, sqlitegen.RemoveCardAssigneeParams{CardID: c.ID, UserID: uid}); err != nil {
+			if err := tx.Q.RemoveCardAssignee(tx.ctx, sqlitegen.RemoveCardAssigneeParams{CardID: c.ID, WorkspaceID: actor.WorkspaceID, UserID: uid}); err != nil {
 				return err
 			}
 			if err := tx.emit(events.AssigneeRemoved, sc, events.AssigneePayload{UserID: uid}); err != nil {
@@ -202,7 +202,7 @@ func (s *Service) SetAssignees(ctx context.Context, actor policy.Actor, cmd comm
 			}
 		}
 		if len(add)+len(remove) > 0 {
-			touchedRow, err := tx.Q.TouchCard(tx.ctx, sqlitegen.TouchCardParams{ID: c.ID, Version: c.Version, UpdatedAt: tx.NowMs})
+			touchedRow, err := tx.Q.TouchCard(tx.ctx, sqlitegen.TouchCardParams{ID: c.ID, WorkspaceID: actor.WorkspaceID, Version: c.Version, UpdatedAt: tx.NowMs})
 			c, err = tx.versioned(c.ID, touchedRow, err)
 			if err != nil {
 				return err

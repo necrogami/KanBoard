@@ -96,11 +96,16 @@ func (q *Queries) CreateColumn(ctx context.Context, arg CreateColumnParams) (Boa
 }
 
 const getBoard = `-- name: GetBoard :one
-SELECT id, workspace_id, project_id, name, position, version, archived_at, created_at, updated_at FROM board WHERE id = ?1
+SELECT id, workspace_id, project_id, name, position, version, archived_at, created_at, updated_at FROM board WHERE id = ?1 AND workspace_id = ?2
 `
 
-func (q *Queries) GetBoard(ctx context.Context, id string) (Board, error) {
-	row := q.db.QueryRowContext(ctx, getBoard, id)
+type GetBoardParams struct {
+	ID          string
+	WorkspaceID string
+}
+
+func (q *Queries) GetBoard(ctx context.Context, arg GetBoardParams) (Board, error) {
+	row := q.db.QueryRowContext(ctx, getBoard, arg.ID, arg.WorkspaceID)
 	var i Board
 	err := row.Scan(
 		&i.ID,
@@ -117,11 +122,16 @@ func (q *Queries) GetBoard(ctx context.Context, id string) (Board, error) {
 }
 
 const getBoardByProject = `-- name: GetBoardByProject :one
-SELECT id, workspace_id, project_id, name, position, version, archived_at, created_at, updated_at FROM board WHERE project_id = ?1 AND archived_at IS NULL ORDER BY position LIMIT 1
+SELECT id, workspace_id, project_id, name, position, version, archived_at, created_at, updated_at FROM board WHERE project_id = ?1 AND workspace_id = ?2 AND archived_at IS NULL ORDER BY position LIMIT 1
 `
 
-func (q *Queries) GetBoardByProject(ctx context.Context, projectID string) (Board, error) {
-	row := q.db.QueryRowContext(ctx, getBoardByProject, projectID)
+type GetBoardByProjectParams struct {
+	ProjectID   string
+	WorkspaceID string
+}
+
+func (q *Queries) GetBoardByProject(ctx context.Context, arg GetBoardByProjectParams) (Board, error) {
+	row := q.db.QueryRowContext(ctx, getBoardByProject, arg.ProjectID, arg.WorkspaceID)
 	var i Board
 	err := row.Scan(
 		&i.ID,
@@ -138,11 +148,16 @@ func (q *Queries) GetBoardByProject(ctx context.Context, projectID string) (Boar
 }
 
 const getColumn = `-- name: GetColumn :one
-SELECT id, workspace_id, board_id, name, position, category, wip_limit, version, archived_at, created_at, updated_at FROM board_column WHERE id = ?1
+SELECT id, workspace_id, board_id, name, position, category, wip_limit, version, archived_at, created_at, updated_at FROM board_column WHERE id = ?1 AND workspace_id = ?2
 `
 
-func (q *Queries) GetColumn(ctx context.Context, id string) (BoardColumn, error) {
-	row := q.db.QueryRowContext(ctx, getColumn, id)
+type GetColumnParams struct {
+	ID          string
+	WorkspaceID string
+}
+
+func (q *Queries) GetColumn(ctx context.Context, arg GetColumnParams) (BoardColumn, error) {
+	row := q.db.QueryRowContext(ctx, getColumn, arg.ID, arg.WorkspaceID)
 	var i BoardColumn
 	err := row.Scan(
 		&i.ID,
@@ -161,11 +176,16 @@ func (q *Queries) GetColumn(ctx context.Context, id string) (BoardColumn, error)
 }
 
 const listColumns = `-- name: ListColumns :many
-SELECT id, workspace_id, board_id, name, position, category, wip_limit, version, archived_at, created_at, updated_at FROM board_column WHERE board_id = ?1 AND archived_at IS NULL ORDER BY position
+SELECT id, workspace_id, board_id, name, position, category, wip_limit, version, archived_at, created_at, updated_at FROM board_column WHERE board_id = ?1 AND workspace_id = ?2 AND archived_at IS NULL ORDER BY position
 `
 
-func (q *Queries) ListColumns(ctx context.Context, boardID string) ([]BoardColumn, error) {
-	rows, err := q.db.QueryContext(ctx, listColumns, boardID)
+type ListColumnsParams struct {
+	BoardID     string
+	WorkspaceID string
+}
+
+func (q *Queries) ListColumns(ctx context.Context, arg ListColumnsParams) ([]BoardColumn, error) {
+	rows, err := q.db.QueryContext(ctx, listColumns, arg.BoardID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}

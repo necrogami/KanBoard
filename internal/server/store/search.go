@@ -14,11 +14,12 @@ import (
 // sqlitegen.Card struct (which follows the migration).
 const cardColumns = "id, workspace_id, project_id, board_id, column_id, number, title, description, position, due_date, created_by, completed_at, archived_at, version, type_id, parent_id, priority, estimate, start_date, resolution, iteration_id, created_at, updated_at"
 
-// SearchCards runs the structured filter against one project. The
+// SearchCards runs the structured filter against one project in one
+// workspace, scoped like every other query (spec section 4). The
 // predicate set is dynamic, so this is the one hand-written query;
 // results are ordered by id (UUIDv7, creation order) with an opaque
 // cursor for the next page.
-func SearchCards(ctx context.Context, db sqlitegen.DBTX, d Dialect, projectID string, f filter.Filter) ([]sqlitegen.Card, string, error) {
+func SearchCards(ctx context.Context, db sqlitegen.DBTX, d Dialect, workspaceID, projectID string, f filter.Filter) ([]sqlitegen.Card, string, error) {
 	var where []string
 	var args []any
 	ph := func(v any) string {
@@ -28,6 +29,7 @@ func SearchCards(ctx context.Context, db sqlitegen.DBTX, d Dialect, projectID st
 		}
 		return "?"
 	}
+	where = append(where, "workspace_id = "+ph(workspaceID))
 	where = append(where, "project_id = "+ph(projectID))
 	if f.Archived != nil && *f.Archived {
 		where = append(where, "archived_at IS NOT NULL")

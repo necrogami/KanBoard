@@ -50,11 +50,16 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, workspace_id, key, name, next_card_number, estimate_unit, version, archived_at, created_at, updated_at FROM project WHERE id = $1
+SELECT id, workspace_id, key, name, next_card_number, estimate_unit, version, archived_at, created_at, updated_at FROM project WHERE id = $1 AND workspace_id = $2
 `
 
-func (q *Queries) GetProject(ctx context.Context, id string) (Project, error) {
-	row := q.db.QueryRowContext(ctx, getProject, id)
+type GetProjectParams struct {
+	ID          string
+	WorkspaceID string
+}
+
+func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (Project, error) {
+	row := q.db.QueryRowContext(ctx, getProject, arg.ID, arg.WorkspaceID)
 	var i Project
 	err := row.Scan(
 		&i.ID,
@@ -99,11 +104,16 @@ func (q *Queries) GetProjectByKey(ctx context.Context, arg GetProjectByKeyParams
 }
 
 const listProjectMembers = `-- name: ListProjectMembers :many
-SELECT workspace_id, project_id, user_id, role, created_at FROM project_member WHERE project_id = $1
+SELECT workspace_id, project_id, user_id, role, created_at FROM project_member WHERE project_id = $1 AND workspace_id = $2
 `
 
-func (q *Queries) ListProjectMembers(ctx context.Context, projectID string) ([]ProjectMember, error) {
-	rows, err := q.db.QueryContext(ctx, listProjectMembers, projectID)
+type ListProjectMembersParams struct {
+	ProjectID   string
+	WorkspaceID string
+}
+
+func (q *Queries) ListProjectMembers(ctx context.Context, arg ListProjectMembersParams) ([]ProjectMember, error) {
+	rows, err := q.db.QueryContext(ctx, listProjectMembers, arg.ProjectID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -132,11 +142,16 @@ func (q *Queries) ListProjectMembers(ctx context.Context, projectID string) ([]P
 }
 
 const listProjectMembershipsForUser = `-- name: ListProjectMembershipsForUser :many
-SELECT workspace_id, project_id, user_id, role, created_at FROM project_member WHERE user_id = $1
+SELECT workspace_id, project_id, user_id, role, created_at FROM project_member WHERE user_id = $1 AND workspace_id = $2
 `
 
-func (q *Queries) ListProjectMembershipsForUser(ctx context.Context, userID string) ([]ProjectMember, error) {
-	rows, err := q.db.QueryContext(ctx, listProjectMembershipsForUser, userID)
+type ListProjectMembershipsForUserParams struct {
+	UserID      string
+	WorkspaceID string
+}
+
+func (q *Queries) ListProjectMembershipsForUser(ctx context.Context, arg ListProjectMembershipsForUserParams) ([]ProjectMember, error) {
+	rows, err := q.db.QueryContext(ctx, listProjectMembershipsForUser, arg.UserID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -204,16 +219,17 @@ func (q *Queries) ListProjects(ctx context.Context, workspaceID string) ([]Proje
 
 const nextCardNumber = `-- name: NextCardNumber :one
 UPDATE project SET next_card_number = next_card_number + 1, updated_at = $1
-WHERE id = $2 RETURNING next_card_number
+WHERE id = $2 AND workspace_id = $3 RETURNING next_card_number
 `
 
 type NextCardNumberParams struct {
-	UpdatedAt int64
-	ID        string
+	UpdatedAt   int64
+	ID          string
+	WorkspaceID string
 }
 
 func (q *Queries) NextCardNumber(ctx context.Context, arg NextCardNumberParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, nextCardNumber, arg.UpdatedAt, arg.ID)
+	row := q.db.QueryRowContext(ctx, nextCardNumber, arg.UpdatedAt, arg.ID, arg.WorkspaceID)
 	var next_card_number int64
 	err := row.Scan(&next_card_number)
 	return next_card_number, err

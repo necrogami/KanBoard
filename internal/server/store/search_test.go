@@ -36,7 +36,7 @@ func TestSearchCards(t *testing.T) {
 		mk(2, c1.ID, "Write docs", 20)
 		d := mk(3, c2.ID, "Deploy", 30)
 		_ = q.AddCardLabel(ctx, sqlitegen.AddCardLabelParams{WorkspaceID: ws.ID, CardID: a.ID, LabelID: lbl.ID})
-		if _, err := q.SetCardArchived(ctx, sqlitegen.SetCardArchivedParams{ID: d.ID, Version: d.Version, ArchivedAt: sqlNull(40), UpdatedAt: 40}); err != nil {
+		if _, err := q.SetCardArchived(ctx, sqlitegen.SetCardArchivedParams{ID: d.ID, WorkspaceID: ws.ID, Version: d.Version, ArchivedAt: sqlNull(40), UpdatedAt: 40}); err != nil {
 			t.Fatal(err)
 		}
 
@@ -45,7 +45,7 @@ func TestSearchCards(t *testing.T) {
 			if err := f.Normalize(); err != nil {
 				t.Fatal(err)
 			}
-			rows, _, err := store.SearchCards(ctx, st.DB, st.Dialect, p.ID, f)
+			rows, _, err := store.SearchCards(ctx, st.DB, st.Dialect, ws.ID, p.ID, f)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -77,12 +77,12 @@ func TestSearchCards(t *testing.T) {
 		// Pagination: limit 1 yields a cursor, second page yields the rest.
 		f := filter.Filter{Limit: 1}
 		_ = f.Normalize()
-		page1, cursor, err := store.SearchCards(ctx, st.DB, st.Dialect, p.ID, f)
+		page1, cursor, err := store.SearchCards(ctx, st.DB, st.Dialect, ws.ID, p.ID, f)
 		if err != nil || len(page1) != 1 || cursor == "" {
 			t.Fatalf("page1 = %d, cursor %q, %v", len(page1), cursor, err)
 		}
 		f.Cursor = cursor
-		page2, cursor2, err := store.SearchCards(ctx, st.DB, st.Dialect, p.ID, f)
+		page2, cursor2, err := store.SearchCards(ctx, st.DB, st.Dialect, ws.ID, p.ID, f)
 		if err != nil || len(page2) != 1 || cursor2 != "" || page2[0].ID == page1[0].ID {
 			t.Fatalf("page2 = %d, cursor %q, %v", len(page2), cursor2, err)
 		}

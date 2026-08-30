@@ -28,8 +28,8 @@ func (a *pgQuerier) CompleteJob(ctx context.Context, arg sqlitegen.CompleteJobPa
 	return a.q.CompleteJob(ctx, pggen.CompleteJobParams(arg))
 }
 
-func (a *pgQuerier) CountCardsInColumn(ctx context.Context, arg string) (int64, error) {
-	r, err := a.q.CountCardsInColumn(ctx, arg)
+func (a *pgQuerier) CountCardsInColumn(ctx context.Context, arg sqlitegen.CountCardsInColumnParams) (int64, error) {
+	r, err := a.q.CountCardsInColumn(ctx, pggen.CountCardsInColumnParams(arg))
 	return r, err
 }
 
@@ -92,23 +92,23 @@ func (a *pgQuerier) DeleteReceiptsBefore(ctx context.Context, arg int64) (int64,
 	return r, err
 }
 
-func (a *pgQuerier) FirstPositionInColumn(ctx context.Context, arg string) (string, error) {
-	r, err := a.q.FirstPositionInColumn(ctx, arg)
+func (a *pgQuerier) FirstPositionInColumn(ctx context.Context, arg sqlitegen.FirstPositionInColumnParams) (string, error) {
+	r, err := a.q.FirstPositionInColumn(ctx, pggen.FirstPositionInColumnParams(arg))
 	return r, err
 }
 
-func (a *pgQuerier) GetBoard(ctx context.Context, arg string) (sqlitegen.Board, error) {
-	r, err := a.q.GetBoard(ctx, arg)
+func (a *pgQuerier) GetBoard(ctx context.Context, arg sqlitegen.GetBoardParams) (sqlitegen.Board, error) {
+	r, err := a.q.GetBoard(ctx, pggen.GetBoardParams(arg))
 	return sqlitegen.Board(r), err
 }
 
-func (a *pgQuerier) GetBoardByProject(ctx context.Context, arg string) (sqlitegen.Board, error) {
-	r, err := a.q.GetBoardByProject(ctx, arg)
+func (a *pgQuerier) GetBoardByProject(ctx context.Context, arg sqlitegen.GetBoardByProjectParams) (sqlitegen.Board, error) {
+	r, err := a.q.GetBoardByProject(ctx, pggen.GetBoardByProjectParams(arg))
 	return sqlitegen.Board(r), err
 }
 
-func (a *pgQuerier) GetCard(ctx context.Context, arg string) (sqlitegen.Card, error) {
-	r, err := a.q.GetCard(ctx, arg)
+func (a *pgQuerier) GetCard(ctx context.Context, arg sqlitegen.GetCardParams) (sqlitegen.Card, error) {
+	r, err := a.q.GetCard(ctx, pggen.GetCardParams(arg))
 	return sqlitegen.Card(r), err
 }
 
@@ -117,8 +117,8 @@ func (a *pgQuerier) GetCardByNumber(ctx context.Context, arg sqlitegen.GetCardBy
 	return sqlitegen.Card(r), err
 }
 
-func (a *pgQuerier) GetColumn(ctx context.Context, arg string) (sqlitegen.BoardColumn, error) {
-	r, err := a.q.GetColumn(ctx, arg)
+func (a *pgQuerier) GetColumn(ctx context.Context, arg sqlitegen.GetColumnParams) (sqlitegen.BoardColumn, error) {
+	r, err := a.q.GetColumn(ctx, pggen.GetColumnParams(arg))
 	return sqlitegen.BoardColumn(r), err
 }
 
@@ -127,13 +127,13 @@ func (a *pgQuerier) GetJob(ctx context.Context, arg string) (sqlitegen.Job, erro
 	return sqlitegen.Job(r), err
 }
 
-func (a *pgQuerier) GetLabel(ctx context.Context, arg string) (sqlitegen.Label, error) {
-	r, err := a.q.GetLabel(ctx, arg)
+func (a *pgQuerier) GetLabel(ctx context.Context, arg sqlitegen.GetLabelParams) (sqlitegen.Label, error) {
+	r, err := a.q.GetLabel(ctx, pggen.GetLabelParams(arg))
 	return sqlitegen.Label(r), err
 }
 
-func (a *pgQuerier) GetProject(ctx context.Context, arg string) (sqlitegen.Project, error) {
-	r, err := a.q.GetProject(ctx, arg)
+func (a *pgQuerier) GetProject(ctx context.Context, arg sqlitegen.GetProjectParams) (sqlitegen.Project, error) {
+	r, err := a.q.GetProject(ctx, pggen.GetProjectParams(arg))
 	return sqlitegen.Project(r), err
 }
 
@@ -147,8 +147,8 @@ func (a *pgQuerier) GetReceipt(ctx context.Context, arg sqlitegen.GetReceiptPara
 	return sqlitegen.CommandReceipt(r), err
 }
 
-func (a *pgQuerier) GetUser(ctx context.Context, arg string) (sqlitegen.AppUser, error) {
-	r, err := a.q.GetUser(ctx, arg)
+func (a *pgQuerier) GetUser(ctx context.Context, arg sqlitegen.GetUserParams) (sqlitegen.AppUser, error) {
+	r, err := a.q.GetUser(ctx, pggen.GetUserParams(arg))
 	return sqlitegen.AppUser(r), err
 }
 
@@ -184,8 +184,8 @@ func (a *pgQuerier) InsertReceipt(ctx context.Context, arg sqlitegen.InsertRecei
 	return a.q.InsertReceipt(ctx, pggen.InsertReceiptParams(arg))
 }
 
-func (a *pgQuerier) LastPositionInColumn(ctx context.Context, arg string) (string, error) {
-	r, err := a.q.LastPositionInColumn(ctx, arg)
+func (a *pgQuerier) LastPositionInColumn(ctx context.Context, arg sqlitegen.LastPositionInColumnParams) (string, error) {
+	r, err := a.q.LastPositionInColumn(ctx, pggen.LastPositionInColumnParams(arg))
 	return r, err
 }
 
@@ -201,13 +201,13 @@ func (a *pgQuerier) LeaseJobs(ctx context.Context, arg sqlitegen.LeaseJobsParams
 	return out, nil
 }
 
-func (a *pgQuerier) ListCardAssigneeIDs(ctx context.Context, arg string) ([]string, error) {
-	r, err := a.q.ListCardAssigneeIDs(ctx, arg)
+func (a *pgQuerier) ListCardAssigneeIDs(ctx context.Context, arg sqlitegen.ListCardAssigneeIDsParams) ([]string, error) {
+	r, err := a.q.ListCardAssigneeIDs(ctx, pggen.ListCardAssigneeIDsParams(arg))
 	return r, err
 }
 
-func (a *pgQuerier) ListCardAssigneeIDsByBoard(ctx context.Context, arg string) ([]sqlitegen.ListCardAssigneeIDsByBoardRow, error) {
-	rs, err := a.q.ListCardAssigneeIDsByBoard(ctx, arg)
+func (a *pgQuerier) ListCardAssigneeIDsByBoard(ctx context.Context, arg sqlitegen.ListCardAssigneeIDsByBoardParams) ([]sqlitegen.ListCardAssigneeIDsByBoardRow, error) {
+	rs, err := a.q.ListCardAssigneeIDsByBoard(ctx, pggen.ListCardAssigneeIDsByBoardParams(arg))
 	if err != nil {
 		return nil, err
 	}
@@ -218,13 +218,13 @@ func (a *pgQuerier) ListCardAssigneeIDsByBoard(ctx context.Context, arg string) 
 	return out, nil
 }
 
-func (a *pgQuerier) ListCardLabelIDs(ctx context.Context, arg string) ([]string, error) {
-	r, err := a.q.ListCardLabelIDs(ctx, arg)
+func (a *pgQuerier) ListCardLabelIDs(ctx context.Context, arg sqlitegen.ListCardLabelIDsParams) ([]string, error) {
+	r, err := a.q.ListCardLabelIDs(ctx, pggen.ListCardLabelIDsParams(arg))
 	return r, err
 }
 
-func (a *pgQuerier) ListCardLabelIDsByBoard(ctx context.Context, arg string) ([]sqlitegen.ListCardLabelIDsByBoardRow, error) {
-	rs, err := a.q.ListCardLabelIDsByBoard(ctx, arg)
+func (a *pgQuerier) ListCardLabelIDsByBoard(ctx context.Context, arg sqlitegen.ListCardLabelIDsByBoardParams) ([]sqlitegen.ListCardLabelIDsByBoardRow, error) {
+	rs, err := a.q.ListCardLabelIDsByBoard(ctx, pggen.ListCardLabelIDsByBoardParams(arg))
 	if err != nil {
 		return nil, err
 	}
@@ -235,8 +235,8 @@ func (a *pgQuerier) ListCardLabelIDsByBoard(ctx context.Context, arg string) ([]
 	return out, nil
 }
 
-func (a *pgQuerier) ListCardsByBoard(ctx context.Context, arg string) ([]sqlitegen.Card, error) {
-	rs, err := a.q.ListCardsByBoard(ctx, arg)
+func (a *pgQuerier) ListCardsByBoard(ctx context.Context, arg sqlitegen.ListCardsByBoardParams) ([]sqlitegen.Card, error) {
+	rs, err := a.q.ListCardsByBoard(ctx, pggen.ListCardsByBoardParams(arg))
 	if err != nil {
 		return nil, err
 	}
@@ -247,8 +247,8 @@ func (a *pgQuerier) ListCardsByBoard(ctx context.Context, arg string) ([]sqliteg
 	return out, nil
 }
 
-func (a *pgQuerier) ListCardsByColumn(ctx context.Context, arg string) ([]sqlitegen.Card, error) {
-	rs, err := a.q.ListCardsByColumn(ctx, arg)
+func (a *pgQuerier) ListCardsByColumn(ctx context.Context, arg sqlitegen.ListCardsByColumnParams) ([]sqlitegen.Card, error) {
+	rs, err := a.q.ListCardsByColumn(ctx, pggen.ListCardsByColumnParams(arg))
 	if err != nil {
 		return nil, err
 	}
@@ -259,8 +259,8 @@ func (a *pgQuerier) ListCardsByColumn(ctx context.Context, arg string) ([]sqlite
 	return out, nil
 }
 
-func (a *pgQuerier) ListColumns(ctx context.Context, arg string) ([]sqlitegen.BoardColumn, error) {
-	rs, err := a.q.ListColumns(ctx, arg)
+func (a *pgQuerier) ListColumns(ctx context.Context, arg sqlitegen.ListColumnsParams) ([]sqlitegen.BoardColumn, error) {
+	rs, err := a.q.ListColumns(ctx, pggen.ListColumnsParams(arg))
 	if err != nil {
 		return nil, err
 	}
@@ -271,8 +271,8 @@ func (a *pgQuerier) ListColumns(ctx context.Context, arg string) ([]sqlitegen.Bo
 	return out, nil
 }
 
-func (a *pgQuerier) ListComments(ctx context.Context, arg string) ([]sqlitegen.Comment, error) {
-	rs, err := a.q.ListComments(ctx, arg)
+func (a *pgQuerier) ListComments(ctx context.Context, arg sqlitegen.ListCommentsParams) ([]sqlitegen.Comment, error) {
+	rs, err := a.q.ListComments(ctx, pggen.ListCommentsParams(arg))
 	if err != nil {
 		return nil, err
 	}
@@ -319,8 +319,8 @@ func (a *pgQuerier) ListJobsByState(ctx context.Context, arg sqlitegen.ListJobsB
 	return out, nil
 }
 
-func (a *pgQuerier) ListLabels(ctx context.Context, arg string) ([]sqlitegen.Label, error) {
-	rs, err := a.q.ListLabels(ctx, arg)
+func (a *pgQuerier) ListLabels(ctx context.Context, arg sqlitegen.ListLabelsParams) ([]sqlitegen.Label, error) {
+	rs, err := a.q.ListLabels(ctx, pggen.ListLabelsParams(arg))
 	if err != nil {
 		return nil, err
 	}
@@ -331,8 +331,8 @@ func (a *pgQuerier) ListLabels(ctx context.Context, arg string) ([]sqlitegen.Lab
 	return out, nil
 }
 
-func (a *pgQuerier) ListProjectMembers(ctx context.Context, arg string) ([]sqlitegen.ProjectMember, error) {
-	rs, err := a.q.ListProjectMembers(ctx, arg)
+func (a *pgQuerier) ListProjectMembers(ctx context.Context, arg sqlitegen.ListProjectMembersParams) ([]sqlitegen.ProjectMember, error) {
+	rs, err := a.q.ListProjectMembers(ctx, pggen.ListProjectMembersParams(arg))
 	if err != nil {
 		return nil, err
 	}
@@ -343,8 +343,8 @@ func (a *pgQuerier) ListProjectMembers(ctx context.Context, arg string) ([]sqlit
 	return out, nil
 }
 
-func (a *pgQuerier) ListProjectMembershipsForUser(ctx context.Context, arg string) ([]sqlitegen.ProjectMember, error) {
-	rs, err := a.q.ListProjectMembershipsForUser(ctx, arg)
+func (a *pgQuerier) ListProjectMembershipsForUser(ctx context.Context, arg sqlitegen.ListProjectMembershipsForUserParams) ([]sqlitegen.ProjectMember, error) {
+	rs, err := a.q.ListProjectMembershipsForUser(ctx, pggen.ListProjectMembershipsForUserParams(arg))
 	if err != nil {
 		return nil, err
 	}

@@ -55,11 +55,16 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (C
 }
 
 const listComments = `-- name: ListComments :many
-SELECT id, workspace_id, card_id, author_id, body, via_token_id, edited_at, deleted_at, created_at, updated_at FROM comment WHERE card_id = ?1 AND deleted_at IS NULL ORDER BY created_at
+SELECT id, workspace_id, card_id, author_id, body, via_token_id, edited_at, deleted_at, created_at, updated_at FROM comment WHERE card_id = ?1 AND workspace_id = ?2 AND deleted_at IS NULL ORDER BY created_at
 `
 
-func (q *Queries) ListComments(ctx context.Context, cardID string) ([]Comment, error) {
-	rows, err := q.db.QueryContext(ctx, listComments, cardID)
+type ListCommentsParams struct {
+	CardID      string
+	WorkspaceID string
+}
+
+func (q *Queries) ListComments(ctx context.Context, arg ListCommentsParams) ([]Comment, error) {
+	rows, err := q.db.QueryContext(ctx, listComments, arg.CardID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}

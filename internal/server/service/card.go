@@ -31,7 +31,7 @@ func (t *Tx) loadCard(key string) (sqlitegen.Card, sqlitegen.Project, error) {
 	if err != nil {
 		return sqlitegen.Card{}, sqlitegen.Project{}, err
 	}
-	c, err := t.Q.GetCardByNumber(t.ctx, sqlitegen.GetCardByNumberParams{ProjectID: p.ID, Number: number})
+	c, err := t.Q.GetCardByNumber(t.ctx, sqlitegen.GetCardByNumberParams{ProjectID: p.ID, WorkspaceID: t.actor.WorkspaceID, Number: number})
 	if isNoRows(err) {
 		return sqlitegen.Card{}, sqlitegen.Project{}, notFound("card")
 	}
@@ -50,11 +50,11 @@ func (t *Tx) checkVersion(current int64) error {
 
 // cardResult builds the DTO including labels and assignees.
 func (t *Tx) cardResult(p sqlitegen.Project, c sqlitegen.Card) (Card, error) {
-	labels, err := t.Q.ListCardLabelIDs(t.ctx, c.ID)
+	labels, err := t.Q.ListCardLabelIDs(t.ctx, sqlitegen.ListCardLabelIDsParams{CardID: c.ID, WorkspaceID: t.actor.WorkspaceID})
 	if err != nil {
 		return Card{}, err
 	}
-	assignees, err := t.Q.ListCardAssigneeIDs(t.ctx, c.ID)
+	assignees, err := t.Q.ListCardAssigneeIDs(t.ctx, sqlitegen.ListCardAssigneeIDsParams{CardID: c.ID, WorkspaceID: t.actor.WorkspaceID})
 	if err != nil {
 		return Card{}, err
 	}
@@ -76,14 +76,14 @@ func (s *Service) CreateCard(ctx context.Context, actor policy.Actor, cmd comman
 	}
 	var out Card
 	err := s.run(ctx, actor, cmd.Meta, "CreateCard", &out, func(tx *Tx) error {
-		p, err := tx.Q.GetProject(tx.ctx, cmd.ProjectID)
-		if isNoRows(err) || (err == nil && p.WorkspaceID != actor.WorkspaceID) {
+		p, err := tx.Q.GetProject(tx.ctx, sqlitegen.GetProjectParams{ID: cmd.ProjectID, WorkspaceID: actor.WorkspaceID})
+		if isNoRows(err) {
 			return notFound("project")
 		}
 		if err != nil {
 			return err
 		}
-		b, err := tx.Q.GetBoardByProject(tx.ctx, p.ID)
+		b, err := tx.Q.GetBoardByProject(tx.ctx, sqlitegen.GetBoardByProjectParams{ProjectID: p.ID, WorkspaceID: actor.WorkspaceID})
 		if err != nil {
 			return err
 		}
@@ -92,7 +92,7 @@ func (s *Service) CreateCard(ctx context.Context, actor policy.Actor, cmd comman
 		}
 		var col sqlitegen.BoardColumn
 		if cmd.ColumnID == "" {
-			cols, err := tx.Q.ListColumns(tx.ctx, b.ID)
+			cols, err := tx.Q.ListColumns(tx.ctx, sqlitegen.ListColumnsParams{BoardID: b.ID, WorkspaceID: actor.WorkspaceID})
 			if err != nil {
 				return err
 			}
@@ -101,7 +101,7 @@ func (s *Service) CreateCard(ctx context.Context, actor policy.Actor, cmd comman
 			}
 			col = cols[0]
 		} else {
-			col, err = tx.Q.GetColumn(tx.ctx, cmd.ColumnID)
+			col, err = tx.Q.GetColumn(tx.ctx, sqlitegen.GetColumnParams{ID: cmd.ColumnID, WorkspaceID: actor.WorkspaceID})
 			if isNoRows(err) || (err == nil && (col.BoardID != b.ID || col.ArchivedAt.Valid)) {
 				return validation(errors.New("column is not on this board"))
 			}
@@ -109,11 +109,11 @@ func (s *Service) CreateCard(ctx context.Context, actor policy.Actor, cmd comman
 				return err
 			}
 		}
-		n, err := tx.Q.NextCardNumber(tx.ctx, sqlitegen.NextCardNumberParams{ID: p.ID, UpdatedAt: tx.NowMs})
+		n, err := tx.Q.NextCardNumber(tx.ctx, sqlitegen.NextCardNumberParams{ID: p.ID, WorkspaceID: actor.WorkspaceID, UpdatedAt: tx.NowMs})
 		if err != nil {
 			return err
 		}
-		last, err := positionOrEmpty(tx.Q.LastPositionInColumn(tx.ctx, col.ID))
+		last, err := positionOrEmpty(tx.Q.LastPositionInColumn(tx.ctx, sqlitegen.LastPositionInColumnParams{ColumnID: col.ID, WorkspaceID: actor.WorkspaceID}))
 		if err != nil {
 			return err
 		}
@@ -157,7 +157,7 @@ func (t *Tx) versioned(id string, row sqlitegen.Card, err error) (sqlitegen.Card
 	if !isNoRows(err) {
 		return row, err
 	}
-	cur, gerr := t.Q.GetCard(t.ctx, id)
+	cur, gerr := t.Q.GetCard(t.ctx, sqlitegen.GetCardParams{ID: id, WorkspaceID: t.actor.WorkspaceID})
 	if isNoRows(gerr) {
 		return sqlitegen.Card{}, notFound("card")
 	}
@@ -200,9 +200,9 @@ func (t *Tx) maybeRebalance(workspaceID, columnID, pos string) error {
 func neighbourSkippingSelf(tx *Tx, column, anchor, selfPos string, after bool) (string, error) {
 	next := func(from string) (string, error) {
 		if after {
-			return positionOrEmpty(tx.Q.NextPositionAfter(tx.ctx, sqlitegen.NextPositionAfterParams{ColumnID: column, Position: from}))
+			return positionOrEmpty(tx.Q.NextPositionAfter(tx.ctx, sqlitegen.NextPositionAfterParams{ColumnID: column, WorkspaceID: tx.actor.WorkspaceID, Position: from}))
 		}
-		return positionOrEmpty(tx.Q.PrevPositionBefore(tx.ctx, sqlitegen.PrevPositionBeforeParams{ColumnID: column, Position: from}))
+		return positionOrEmpty(tx.Q.PrevPositionBefore(tx.ctx, sqlitegen.PrevPositionBeforeParams{ColumnID: column, WorkspaceID: tx.actor.WorkspaceID, Position: from}))
 	}
 	pos, err := next(anchor)
 	if err != nil || selfPos == "" || pos != selfPos {
@@ -254,15 +254,15 @@ func moveBounds(tx *Tx, to sqlitegen.BoardColumn, moving sqlitegen.Card, cmd com
 		}
 	}
 	if cmd.Position == commands.PositionTop && !soft {
-		upper, err = positionOrEmpty(tx.Q.FirstPositionInColumn(tx.ctx, to.ID))
+		upper, err = positionOrEmpty(tx.Q.FirstPositionInColumn(tx.ctx, sqlitegen.FirstPositionInColumnParams{ColumnID: to.ID, WorkspaceID: tx.actor.WorkspaceID}))
 		if err == nil && selfPos != "" && upper == selfPos {
-			upper, err = positionOrEmpty(tx.Q.NextPositionAfter(tx.ctx, sqlitegen.NextPositionAfterParams{ColumnID: to.ID, Position: selfPos}))
+			upper, err = positionOrEmpty(tx.Q.NextPositionAfter(tx.ctx, sqlitegen.NextPositionAfterParams{ColumnID: to.ID, WorkspaceID: tx.actor.WorkspaceID, Position: selfPos}))
 		}
 		return "", upper, false, err
 	}
-	lower, err = positionOrEmpty(tx.Q.LastPositionInColumn(tx.ctx, to.ID))
+	lower, err = positionOrEmpty(tx.Q.LastPositionInColumn(tx.ctx, sqlitegen.LastPositionInColumnParams{ColumnID: to.ID, WorkspaceID: tx.actor.WorkspaceID}))
 	if err == nil && selfPos != "" && lower == selfPos {
-		lower, err = positionOrEmpty(tx.Q.PrevPositionBefore(tx.ctx, sqlitegen.PrevPositionBeforeParams{ColumnID: to.ID, Position: selfPos}))
+		lower, err = positionOrEmpty(tx.Q.PrevPositionBefore(tx.ctx, sqlitegen.PrevPositionBeforeParams{ColumnID: to.ID, WorkspaceID: tx.actor.WorkspaceID, Position: selfPos}))
 	}
 	return lower, "", soft, err
 }
@@ -287,11 +287,11 @@ func (s *Service) MoveCard(ctx context.Context, actor policy.Actor, cmd commands
 		if err := tx.checkVersion(c.Version); err != nil {
 			return err
 		}
-		from, err := tx.Q.GetColumn(tx.ctx, c.ColumnID)
+		from, err := tx.Q.GetColumn(tx.ctx, sqlitegen.GetColumnParams{ID: c.ColumnID, WorkspaceID: actor.WorkspaceID})
 		if err != nil {
 			return err
 		}
-		to, err := tx.Q.GetColumn(tx.ctx, cmd.ColumnID)
+		to, err := tx.Q.GetColumn(tx.ctx, sqlitegen.GetColumnParams{ID: cmd.ColumnID, WorkspaceID: actor.WorkspaceID})
 		if isNoRows(err) || (err == nil && (to.BoardID != c.BoardID || to.ArchivedAt.Valid)) {
 			return validation(errors.New("column is not on this board"))
 		}
@@ -318,7 +318,7 @@ func (s *Service) MoveCard(ctx context.Context, actor policy.Actor, cmd commands
 			completed = sql.NullInt64{}
 		}
 		movedRow, err := tx.Q.MoveCard(tx.ctx, sqlitegen.MoveCardParams{
-			ID: c.ID, Version: c.Version, ColumnID: to.ID, Position: pos, CompletedAt: completed, UpdatedAt: tx.NowMs,
+			ID: c.ID, WorkspaceID: actor.WorkspaceID, Version: c.Version, ColumnID: to.ID, Position: pos, CompletedAt: completed, UpdatedAt: tx.NowMs,
 		})
 		moved, err := tx.versioned(c.ID, movedRow, err)
 		if err != nil {
@@ -391,7 +391,7 @@ func (s *Service) UpdateCard(ctx context.Context, actor policy.Actor, cmd comman
 			out, err = tx.cardResult(p, c)
 			return err
 		}
-		updatedRow, err := tx.Q.UpdateCardFields(tx.ctx, sqlitegen.UpdateCardFieldsParams{ID: c.ID, Version: c.Version, Title: title, Description: desc, DueDate: due, UpdatedAt: tx.NowMs})
+		updatedRow, err := tx.Q.UpdateCardFields(tx.ctx, sqlitegen.UpdateCardFieldsParams{ID: c.ID, WorkspaceID: actor.WorkspaceID, Version: c.Version, Title: title, Description: desc, DueDate: due, UpdatedAt: tx.NowMs})
 		updated, err := tx.versioned(c.ID, updatedRow, err)
 		if err != nil {
 			return err
@@ -433,7 +433,7 @@ func (s *Service) setArchived(ctx context.Context, actor policy.Actor, meta comm
 		if archive {
 			at = sql.NullInt64{Int64: tx.NowMs, Valid: true}
 		}
-		archivedRow, err := tx.Q.SetCardArchived(tx.ctx, sqlitegen.SetCardArchivedParams{ID: c.ID, Version: c.Version, ArchivedAt: at, UpdatedAt: tx.NowMs})
+		archivedRow, err := tx.Q.SetCardArchived(tx.ctx, sqlitegen.SetCardArchivedParams{ID: c.ID, WorkspaceID: actor.WorkspaceID, Version: c.Version, ArchivedAt: at, UpdatedAt: tx.NowMs})
 		updated, err := tx.versioned(c.ID, archivedRow, err)
 		if err != nil {
 			return err
@@ -484,7 +484,7 @@ func (s *Service) GetCard(ctx context.Context, actor policy.Actor, key string) (
 	if err != nil {
 		return Card{}, nil, err
 	}
-	rows, err := q.ListComments(ctx, c.ID)
+	rows, err := q.ListComments(ctx, sqlitegen.ListCommentsParams{CardID: c.ID, WorkspaceID: actor.WorkspaceID})
 	if err != nil {
 		return Card{}, nil, err
 	}
@@ -512,14 +512,14 @@ func (s *Service) SearchCards(ctx context.Context, actor policy.Actor, projectKe
 	// resolved against an empty Resource.BoardID would be allowed to read
 	// any project in the workspace, which is the restriction it exists to
 	// impose.
-	b, err := q.GetBoardByProject(ctx, p.ID)
+	b, err := q.GetBoardByProject(ctx, sqlitegen.GetBoardByProjectParams{ProjectID: p.ID, WorkspaceID: actor.WorkspaceID})
 	if err != nil {
 		return nil, "", err
 	}
 	if !policy.Can(actor, policy.ProjectRead, policy.Resource{ProjectID: p.ID, BoardID: b.ID}) {
 		return nil, "", forbidden()
 	}
-	rows, next, err := store.SearchCards(ctx, s.st.DB, s.st.Dialect, p.ID, f)
+	rows, next, err := store.SearchCards(ctx, s.st.DB, s.st.Dialect, actor.WorkspaceID, p.ID, f)
 	if err != nil {
 		return nil, "", err
 	}

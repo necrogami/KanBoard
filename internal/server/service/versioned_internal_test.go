@@ -48,10 +48,10 @@ func TestVersionedZeroRows(t *testing.T) {
 		}
 
 		q := st.Q()
-		if _, err := q.TouchCard(ctx, sqlitegen.TouchCardParams{ID: card.ID, Version: card.Version, UpdatedAt: 2}); err != nil {
+		if _, err := q.TouchCard(ctx, sqlitegen.TouchCardParams{ID: card.ID, WorkspaceID: ws.ID, Version: card.Version, UpdatedAt: 2}); err != nil {
 			t.Fatal(err)
 		}
-		tx := &Tx{ctx: ctx, Q: q, s: svc}
+		tx := &Tx{ctx: ctx, Q: q, s: svc, actor: admin}
 
 		_, err = tx.versioned(card.ID, sqlitegen.Card{}, sql.ErrNoRows)
 		var se *Error

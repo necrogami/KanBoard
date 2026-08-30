@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/necrogami/kanboard/internal/core/filter"
 	"github.com/necrogami/kanboard/internal/core/id"
 	"github.com/necrogami/kanboard/internal/server/store"
 	"github.com/necrogami/kanboard/internal/server/store/sqlitegen"
@@ -72,11 +73,11 @@ func TestCardPositions(t *testing.T) {
 		p, _ := q.CreateProject(ctx, sqlitegen.CreateProjectParams{ID: id.New(), WorkspaceID: ws.ID, Key: "POS", Name: "P", CreatedAt: 1, UpdatedAt: 1})
 		b, _ := q.CreateBoard(ctx, sqlitegen.CreateBoardParams{ID: id.New(), WorkspaceID: ws.ID, ProjectID: p.ID, Name: "B", Position: "V", CreatedAt: 1, UpdatedAt: 1})
 		c, _ := q.CreateColumn(ctx, sqlitegen.CreateColumnParams{ID: id.New(), WorkspaceID: ws.ID, BoardID: b.ID, Name: "Todo", Position: "V", Category: "todo", CreatedAt: 1, UpdatedAt: 1})
-		if _, err := q.FirstPositionInColumn(ctx, c.ID); !errors.Is(err, sql.ErrNoRows) {
+		if _, err := q.FirstPositionInColumn(ctx, sqlitegen.FirstPositionInColumnParams{ColumnID: c.ID, WorkspaceID: ws.ID}); !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("empty column first = %v", err)
 		}
 		for i, pos := range []string{"F", "V", "k"} {
-			n, err := q.NextCardNumber(ctx, sqlitegen.NextCardNumberParams{ID: p.ID, UpdatedAt: 1})
+			n, err := q.NextCardNumber(ctx, sqlitegen.NextCardNumberParams{ID: p.ID, WorkspaceID: ws.ID, UpdatedAt: 1})
 			if err != nil || n != int64(i+1) {
 				t.Fatalf("NextCardNumber = %d, %v", n, err)
 			}
@@ -84,23 +85,74 @@ func TestCardPositions(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		first, _ := q.FirstPositionInColumn(ctx, c.ID)
-		last, _ := q.LastPositionInColumn(ctx, c.ID)
-		next, _ := q.NextPositionAfter(ctx, sqlitegen.NextPositionAfterParams{ColumnID: c.ID, Position: "F"})
+		first, _ := q.FirstPositionInColumn(ctx, sqlitegen.FirstPositionInColumnParams{ColumnID: c.ID, WorkspaceID: ws.ID})
+		last, _ := q.LastPositionInColumn(ctx, sqlitegen.LastPositionInColumnParams{ColumnID: c.ID, WorkspaceID: ws.ID})
+		next, _ := q.NextPositionAfter(ctx, sqlitegen.NextPositionAfterParams{ColumnID: c.ID, WorkspaceID: ws.ID, Position: "F"})
 		if first != "F" || last != "k" || next != "V" {
 			t.Fatalf("first=%q last=%q next=%q", first, last, next)
 		}
-		cnt, _ := q.CountCardsInColumn(ctx, c.ID)
+		cnt, _ := q.CountCardsInColumn(ctx, sqlitegen.CountCardsInColumnParams{ColumnID: c.ID, WorkspaceID: ws.ID})
 		if cnt != 3 {
 			t.Fatalf("count = %d", cnt)
 		}
-		prev, _ := q.PrevPositionBefore(ctx, sqlitegen.PrevPositionBeforeParams{ColumnID: c.ID, Position: "k"})
+		prev, _ := q.PrevPositionBefore(ctx, sqlitegen.PrevPositionBeforeParams{ColumnID: c.ID, WorkspaceID: ws.ID, Position: "k"})
 		if prev != "V" {
 			t.Fatalf("prev = %q", prev)
 		}
-		byCol, _ := q.ListCardsByColumn(ctx, c.ID)
+		byCol, _ := q.ListCardsByColumn(ctx, sqlitegen.ListCardsByColumnParams{ColumnID: c.ID, WorkspaceID: ws.ID})
 		if len(byCol) != 3 || byCol[0].Position != "F" {
 			t.Fatalf("ListCardsByColumn = %d rows", len(byCol))
+		}
+	})
+}
+
+// TestQueriesAreWorkspaceScoped: spec section 4 says every table except
+// workspace carries workspace_id and every query is scoped by it from
+// 0.1, so multi-workspace hosting is a schema and query change rather
+// than an audit of every caller. This pins the property for the entity
+// lookups an adapter is most likely to reach for with an id from a
+// request.
+func TestQueriesAreWorkspaceScoped(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st *store.Store) {
+		ctx := context.Background()
+		q := st.Q()
+		ws, _ := q.CreateWorkspace(ctx, sqlitegen.CreateWorkspaceParams{ID: id.New(), Name: "Mine", Slug: "mine", CreatedAt: 1, UpdatedAt: 1})
+		other, _ := q.CreateWorkspace(ctx, sqlitegen.CreateWorkspaceParams{ID: id.New(), Name: "Other", Slug: "other", CreatedAt: 1, UpdatedAt: 1})
+		u, _ := q.CreateUser(ctx, sqlitegen.CreateUserParams{ID: id.New(), WorkspaceID: ws.ID, Name: "U", Kind: "human", Locale: "en", CreatedAt: 1, UpdatedAt: 1})
+		p, _ := q.CreateProject(ctx, sqlitegen.CreateProjectParams{ID: id.New(), WorkspaceID: ws.ID, Key: "SCOPE", Name: "S", CreatedAt: 1, UpdatedAt: 1})
+		b, _ := q.CreateBoard(ctx, sqlitegen.CreateBoardParams{ID: id.New(), WorkspaceID: ws.ID, ProjectID: p.ID, Name: "B", Position: "V", CreatedAt: 1, UpdatedAt: 1})
+		col, _ := q.CreateColumn(ctx, sqlitegen.CreateColumnParams{ID: id.New(), WorkspaceID: ws.ID, BoardID: b.ID, Name: "Todo", Position: "V", Category: "todo", CreatedAt: 1, UpdatedAt: 1})
+		card, err := q.CreateCard(ctx, sqlitegen.CreateCardParams{ID: id.New(), WorkspaceID: ws.ID, ProjectID: p.ID, BoardID: b.ID, ColumnID: col.ID, Number: 1, Title: "t", Description: "", Position: "V", CreatedBy: u.ID, CreatedAt: 1, UpdatedAt: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Every id below is real; only the workspace is wrong.
+		if _, err := q.GetCard(ctx, sqlitegen.GetCardParams{ID: card.ID, WorkspaceID: other.ID}); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("GetCard across workspaces = %v", err)
+		}
+		if _, err := q.GetProject(ctx, sqlitegen.GetProjectParams{ID: p.ID, WorkspaceID: other.ID}); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("GetProject across workspaces = %v", err)
+		}
+		if _, err := q.GetColumn(ctx, sqlitegen.GetColumnParams{ID: col.ID, WorkspaceID: other.ID}); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("GetColumn across workspaces = %v", err)
+		}
+		if _, err := q.GetUser(ctx, sqlitegen.GetUserParams{ID: u.ID, WorkspaceID: other.ID}); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("GetUser across workspaces = %v", err)
+		}
+		if cards, err := q.ListCardsByBoard(ctx, sqlitegen.ListCardsByBoardParams{BoardID: b.ID, WorkspaceID: other.ID}); err != nil || len(cards) != 0 {
+			t.Fatalf("ListCardsByBoard across workspaces = %d, %v", len(cards), err)
+		}
+		if _, err := q.TouchCard(ctx, sqlitegen.TouchCardParams{ID: card.ID, WorkspaceID: other.ID, Version: card.Version, UpdatedAt: 2}); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("TouchCard across workspaces = %v", err)
+		}
+		rows, _, err := store.SearchCards(ctx, st.DB, st.Dialect, other.ID, p.ID, filter.Filter{Limit: 10})
+		if err != nil || len(rows) != 0 {
+			t.Fatalf("SearchCards across workspaces = %d, %v", len(rows), err)
+		}
+		// The same calls in the right workspace still work.
+		if got, err := q.GetCard(ctx, sqlitegen.GetCardParams{ID: card.ID, WorkspaceID: ws.ID}); err != nil || got.ID != card.ID {
+			t.Fatalf("GetCard in its own workspace = %+v, %v", got, err)
 		}
 	})
 }
@@ -129,7 +181,7 @@ func TestTextOrderingIsBytewiseOnBothEngines(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		ls, err := q.ListLabels(ctx, p.ID)
+		ls, err := q.ListLabels(ctx, sqlitegen.ListLabelsParams{ProjectID: p.ID, WorkspaceID: ws.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -160,7 +212,7 @@ func TestEveryQueryRunsOnBothEngines(t *testing.T) {
 		if _, err := q.CreateLabel(ctx, sqlitegen.CreateLabelParams{ID: id.New(), WorkspaceID: ws.ID, ProjectID: p.ID, Name: "bug", Color: "#FF0000", CreatedAt: 1, UpdatedAt: 1}); err != nil {
 			t.Fatal(err)
 		}
-		if ls, err := q.ListLabels(ctx, p.ID); err != nil || len(ls) != 1 {
+		if ls, err := q.ListLabels(ctx, sqlitegen.ListLabelsParams{ProjectID: p.ID, WorkspaceID: ws.ID}); err != nil || len(ls) != 1 {
 			t.Fatalf("ListLabels: %d %v", len(ls), err)
 		}
 		for i := int64(1); i <= 3; i++ {
@@ -171,7 +223,7 @@ func TestEveryQueryRunsOnBothEngines(t *testing.T) {
 		if evs, err := q.ListEventsSince(ctx, sqlitegen.ListEventsSinceParams{WorkspaceID: ws.ID, Seq: 1, Lim: 10}); err != nil || len(evs) != 2 || evs[0].Seq != 2 {
 			t.Fatalf("ListEventsSince: %d %v", len(evs), err)
 		}
-		if evs, err := q.ListEventsByCard(ctx, sqlitegen.ListEventsByCardParams{CardID: sql.NullString{String: "none", Valid: true}, Lim: 10}); err != nil || len(evs) != 0 {
+		if evs, err := q.ListEventsByCard(ctx, sqlitegen.ListEventsByCardParams{WorkspaceID: ws.ID, CardID: sql.NullString{String: "none", Valid: true}, Lim: 10}); err != nil || len(evs) != 0 {
 			t.Fatalf("ListEventsByCard: %d %v", len(evs), err)
 		}
 		if err := q.InsertJob(ctx, sqlitegen.InsertJobParams{ID: "job1", Kind: "k", Payload: "{}", MaxAttempts: 1, RunAt: 1, CreatedAt: 1}); err != nil {
@@ -223,33 +275,33 @@ func TestBoardQueries(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, err := q.GetBoard(ctx, b.ID); err != nil || got.ID != b.ID {
+		if got, err := q.GetBoard(ctx, sqlitegen.GetBoardParams{ID: b.ID, WorkspaceID: ws.ID}); err != nil || got.ID != b.ID {
 			t.Fatalf("GetBoard: %+v %v", got, err)
 		}
-		if got, err := q.GetBoardByProject(ctx, p.ID); err != nil || got.ID != b.ID {
+		if got, err := q.GetBoardByProject(ctx, sqlitegen.GetBoardByProjectParams{ProjectID: p.ID, WorkspaceID: ws.ID}); err != nil || got.ID != b.ID {
 			t.Fatalf("GetBoardByProject: %+v %v", got, err)
 		}
 		c, err := q.CreateColumn(ctx, sqlitegen.CreateColumnParams{ID: id.New(), WorkspaceID: ws.ID, BoardID: b.ID, Name: "Todo", Position: "V", Category: "todo", CreatedAt: 1, UpdatedAt: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, err := q.GetColumn(ctx, c.ID); err != nil || got.ID != c.ID {
+		if got, err := q.GetColumn(ctx, sqlitegen.GetColumnParams{ID: c.ID, WorkspaceID: ws.ID}); err != nil || got.ID != c.ID {
 			t.Fatalf("GetColumn: %+v %v", got, err)
 		}
-		if cols, err := q.ListColumns(ctx, b.ID); err != nil || len(cols) != 1 || cols[0].ID != c.ID {
+		if cols, err := q.ListColumns(ctx, sqlitegen.ListColumnsParams{BoardID: b.ID, WorkspaceID: ws.ID}); err != nil || len(cols) != 1 || cols[0].ID != c.ID {
 			t.Fatalf("ListColumns: %d %v", len(cols), err)
 		}
 		card, err := q.CreateCard(ctx, sqlitegen.CreateCardParams{ID: id.New(), WorkspaceID: ws.ID, ProjectID: p.ID, BoardID: b.ID, ColumnID: c.ID, Number: 1, Title: "t", Description: "", Position: "V", CreatedBy: u.ID, CreatedAt: 1, UpdatedAt: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, err := q.GetCard(ctx, card.ID); err != nil || got.ID != card.ID {
+		if got, err := q.GetCard(ctx, sqlitegen.GetCardParams{ID: card.ID, WorkspaceID: ws.ID}); err != nil || got.ID != card.ID {
 			t.Fatalf("GetCard: %+v %v", got, err)
 		}
-		if got, err := q.GetCardByNumber(ctx, sqlitegen.GetCardByNumberParams{ProjectID: p.ID, Number: 1}); err != nil || got.ID != card.ID {
+		if got, err := q.GetCardByNumber(ctx, sqlitegen.GetCardByNumberParams{ProjectID: p.ID, WorkspaceID: ws.ID, Number: 1}); err != nil || got.ID != card.ID {
 			t.Fatalf("GetCardByNumber: %+v %v", got, err)
 		}
-		if cards, err := q.ListCardsByBoard(ctx, b.ID); err != nil || len(cards) != 1 || cards[0].ID != card.ID {
+		if cards, err := q.ListCardsByBoard(ctx, sqlitegen.ListCardsByBoardParams{BoardID: b.ID, WorkspaceID: ws.ID}); err != nil || len(cards) != 1 || cards[0].ID != card.ID {
 			t.Fatalf("ListCardsByBoard: %d %v", len(cards), err)
 		}
 	})
@@ -273,35 +325,35 @@ func TestCardVersionedUpdates(t *testing.T) {
 			t.Fatalf("CreateCard = %+v, %v", card, err)
 		}
 
-		moved, err := q.MoveCard(ctx, sqlitegen.MoveCardParams{ID: card.ID, ColumnID: c2.ID, Position: "W", UpdatedAt: 2, Version: card.Version})
+		moved, err := q.MoveCard(ctx, sqlitegen.MoveCardParams{ID: card.ID, WorkspaceID: ws.ID, ColumnID: c2.ID, Position: "W", UpdatedAt: 2, Version: card.Version})
 		if err != nil || moved.Version != 2 || moved.ColumnID != c2.ID {
 			t.Fatalf("MoveCard = %+v, %v", moved, err)
 		}
-		if _, err := q.MoveCard(ctx, sqlitegen.MoveCardParams{ID: card.ID, ColumnID: c2.ID, Position: "X", UpdatedAt: 3, Version: 1}); !errors.Is(err, sql.ErrNoRows) {
+		if _, err := q.MoveCard(ctx, sqlitegen.MoveCardParams{ID: card.ID, WorkspaceID: ws.ID, ColumnID: c2.ID, Position: "X", UpdatedAt: 3, Version: 1}); !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("MoveCard stale version = %v", err)
 		}
 
-		updated, err := q.UpdateCardFields(ctx, sqlitegen.UpdateCardFieldsParams{ID: card.ID, Title: "t2", Description: "d2", UpdatedAt: 4, Version: moved.Version})
+		updated, err := q.UpdateCardFields(ctx, sqlitegen.UpdateCardFieldsParams{ID: card.ID, WorkspaceID: ws.ID, Title: "t2", Description: "d2", UpdatedAt: 4, Version: moved.Version})
 		if err != nil || updated.Version != 3 || updated.Title != "t2" {
 			t.Fatalf("UpdateCardFields = %+v, %v", updated, err)
 		}
-		if _, err := q.UpdateCardFields(ctx, sqlitegen.UpdateCardFieldsParams{ID: card.ID, Title: "t3", Description: "d3", UpdatedAt: 5, Version: 2}); !errors.Is(err, sql.ErrNoRows) {
+		if _, err := q.UpdateCardFields(ctx, sqlitegen.UpdateCardFieldsParams{ID: card.ID, WorkspaceID: ws.ID, Title: "t3", Description: "d3", UpdatedAt: 5, Version: 2}); !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("UpdateCardFields stale version = %v", err)
 		}
 
-		archived, err := q.SetCardArchived(ctx, sqlitegen.SetCardArchivedParams{ID: card.ID, ArchivedAt: sql.NullInt64{Int64: 9, Valid: true}, UpdatedAt: 6, Version: updated.Version})
+		archived, err := q.SetCardArchived(ctx, sqlitegen.SetCardArchivedParams{ID: card.ID, WorkspaceID: ws.ID, ArchivedAt: sql.NullInt64{Int64: 9, Valid: true}, UpdatedAt: 6, Version: updated.Version})
 		if err != nil || archived.Version != 4 || !archived.ArchivedAt.Valid {
 			t.Fatalf("SetCardArchived = %+v, %v", archived, err)
 		}
-		if _, err := q.SetCardArchived(ctx, sqlitegen.SetCardArchivedParams{ID: card.ID, ArchivedAt: sql.NullInt64{Int64: 9, Valid: true}, UpdatedAt: 7, Version: 3}); !errors.Is(err, sql.ErrNoRows) {
+		if _, err := q.SetCardArchived(ctx, sqlitegen.SetCardArchivedParams{ID: card.ID, WorkspaceID: ws.ID, ArchivedAt: sql.NullInt64{Int64: 9, Valid: true}, UpdatedAt: 7, Version: 3}); !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("SetCardArchived stale version = %v", err)
 		}
 
-		touched, err := q.TouchCard(ctx, sqlitegen.TouchCardParams{ID: card.ID, UpdatedAt: 8, Version: archived.Version})
+		touched, err := q.TouchCard(ctx, sqlitegen.TouchCardParams{ID: card.ID, WorkspaceID: ws.ID, UpdatedAt: 8, Version: archived.Version})
 		if err != nil || touched.Version != 5 {
 			t.Fatalf("TouchCard = %+v, %v", touched, err)
 		}
-		if _, err := q.TouchCard(ctx, sqlitegen.TouchCardParams{ID: card.ID, UpdatedAt: 9, Version: 4}); !errors.Is(err, sql.ErrNoRows) {
+		if _, err := q.TouchCard(ctx, sqlitegen.TouchCardParams{ID: card.ID, WorkspaceID: ws.ID, UpdatedAt: 9, Version: 4}); !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("TouchCard stale version = %v", err)
 		}
 	})
@@ -322,7 +374,7 @@ func TestLabelAndAssigneeQueries(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, err := q.GetLabel(ctx, lbl.ID); err != nil || got.ID != lbl.ID {
+		if got, err := q.GetLabel(ctx, sqlitegen.GetLabelParams{ID: lbl.ID, WorkspaceID: ws.ID}); err != nil || got.ID != lbl.ID {
 			t.Fatalf("GetLabel: %+v %v", got, err)
 		}
 
@@ -333,13 +385,13 @@ func TestLabelAndAssigneeQueries(t *testing.T) {
 		if err := q.AddCardLabel(ctx, sqlitegen.AddCardLabelParams{WorkspaceID: ws.ID, CardID: card.ID, LabelID: lbl.ID}); err != nil {
 			t.Fatal(err)
 		}
-		if ids, err := q.ListCardLabelIDs(ctx, card.ID); err != nil || len(ids) != 1 || ids[0] != lbl.ID {
+		if ids, err := q.ListCardLabelIDs(ctx, sqlitegen.ListCardLabelIDsParams{CardID: card.ID, WorkspaceID: ws.ID}); err != nil || len(ids) != 1 || ids[0] != lbl.ID {
 			t.Fatalf("ListCardLabelIDs = %v, %v", ids, err)
 		}
-		if err := q.RemoveCardLabel(ctx, sqlitegen.RemoveCardLabelParams{CardID: card.ID, LabelID: lbl.ID}); err != nil {
+		if err := q.RemoveCardLabel(ctx, sqlitegen.RemoveCardLabelParams{CardID: card.ID, WorkspaceID: ws.ID, LabelID: lbl.ID}); err != nil {
 			t.Fatal(err)
 		}
-		if ids, err := q.ListCardLabelIDs(ctx, card.ID); err != nil || len(ids) != 0 {
+		if ids, err := q.ListCardLabelIDs(ctx, sqlitegen.ListCardLabelIDsParams{CardID: card.ID, WorkspaceID: ws.ID}); err != nil || len(ids) != 0 {
 			t.Fatalf("ListCardLabelIDs after remove = %v, %v", ids, err)
 		}
 
@@ -350,13 +402,13 @@ func TestLabelAndAssigneeQueries(t *testing.T) {
 		if err := q.AddCardAssignee(ctx, sqlitegen.AddCardAssigneeParams{WorkspaceID: ws.ID, CardID: card.ID, UserID: u.ID}); err != nil {
 			t.Fatal(err)
 		}
-		if ids, err := q.ListCardAssigneeIDs(ctx, card.ID); err != nil || len(ids) != 1 || ids[0] != u.ID {
+		if ids, err := q.ListCardAssigneeIDs(ctx, sqlitegen.ListCardAssigneeIDsParams{CardID: card.ID, WorkspaceID: ws.ID}); err != nil || len(ids) != 1 || ids[0] != u.ID {
 			t.Fatalf("ListCardAssigneeIDs = %v, %v", ids, err)
 		}
-		if err := q.RemoveCardAssignee(ctx, sqlitegen.RemoveCardAssigneeParams{CardID: card.ID, UserID: u.ID}); err != nil {
+		if err := q.RemoveCardAssignee(ctx, sqlitegen.RemoveCardAssigneeParams{CardID: card.ID, WorkspaceID: ws.ID, UserID: u.ID}); err != nil {
 			t.Fatal(err)
 		}
-		if ids, err := q.ListCardAssigneeIDs(ctx, card.ID); err != nil || len(ids) != 0 {
+		if ids, err := q.ListCardAssigneeIDs(ctx, sqlitegen.ListCardAssigneeIDsParams{CardID: card.ID, WorkspaceID: ws.ID}); err != nil || len(ids) != 0 {
 			t.Fatalf("ListCardAssigneeIDs after remove = %v, %v", ids, err)
 		}
 
@@ -371,7 +423,7 @@ func TestLabelAndAssigneeQueries(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := q.SetCardArchived(ctx, sqlitegen.SetCardArchivedParams{ID: gone.ID, Version: gone.Version, ArchivedAt: sql.NullInt64{Int64: 2, Valid: true}, UpdatedAt: 2}); err != nil {
+		if _, err := q.SetCardArchived(ctx, sqlitegen.SetCardArchivedParams{ID: gone.ID, WorkspaceID: ws.ID, Version: gone.Version, ArchivedAt: sql.NullInt64{Int64: 2, Valid: true}, UpdatedAt: 2}); err != nil {
 			t.Fatal(err)
 		}
 		for _, cid := range []string{card.ID, card2.ID, gone.ID} {
@@ -383,11 +435,11 @@ func TestLabelAndAssigneeQueries(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		lrows, err := q.ListCardLabelIDsByBoard(ctx, b.ID)
+		lrows, err := q.ListCardLabelIDsByBoard(ctx, sqlitegen.ListCardLabelIDsByBoardParams{BoardID: b.ID, WorkspaceID: ws.ID})
 		if err != nil || len(lrows) != 2 {
 			t.Fatalf("ListCardLabelIDsByBoard = %+v, %v (the archived card must be excluded)", lrows, err)
 		}
-		arows, err := q.ListCardAssigneeIDsByBoard(ctx, b.ID)
+		arows, err := q.ListCardAssigneeIDsByBoard(ctx, sqlitegen.ListCardAssigneeIDsByBoardParams{BoardID: b.ID, WorkspaceID: ws.ID})
 		if err != nil || len(arows) != 1 || arows[0].CardID != card2.ID || arows[0].UserID != u.ID {
 			t.Fatalf("ListCardAssigneeIDsByBoard = %+v, %v", arows, err)
 		}
@@ -435,10 +487,10 @@ func TestMembershipUpserts(t *testing.T) {
 		if err := q.UpsertProjectMember(ctx, sqlitegen.UpsertProjectMemberParams{WorkspaceID: ws.ID, ProjectID: p.ID, UserID: u.ID, Role: "lead", CreatedAt: 1}); err != nil {
 			t.Fatal(err)
 		}
-		if members, err := q.ListProjectMembers(ctx, p.ID); err != nil || len(members) != 1 || members[0].Role != "lead" {
+		if members, err := q.ListProjectMembers(ctx, sqlitegen.ListProjectMembersParams{ProjectID: p.ID, WorkspaceID: ws.ID}); err != nil || len(members) != 1 || members[0].Role != "lead" {
 			t.Fatalf("ListProjectMembers after upsert = %+v, %v; want one member with role=lead", members, err)
 		}
-		if memberships, err := q.ListProjectMembershipsForUser(ctx, u.ID); err != nil || len(memberships) != 1 || memberships[0].ProjectID != p.ID {
+		if memberships, err := q.ListProjectMembershipsForUser(ctx, sqlitegen.ListProjectMembershipsForUserParams{UserID: u.ID, WorkspaceID: ws.ID}); err != nil || len(memberships) != 1 || memberships[0].ProjectID != p.ID {
 			t.Fatalf("ListProjectMembershipsForUser = %+v, %v", memberships, err)
 		}
 	})
@@ -459,7 +511,7 @@ func TestCommentQueries(t *testing.T) {
 		if err != nil || cm.Body != "hi" {
 			t.Fatalf("CreateComment = %+v, %v", cm, err)
 		}
-		if cs, err := q.ListComments(ctx, card.ID); err != nil || len(cs) != 1 || cs[0].ID != cm.ID {
+		if cs, err := q.ListComments(ctx, sqlitegen.ListCommentsParams{CardID: card.ID, WorkspaceID: ws.ID}); err != nil || len(cs) != 1 || cs[0].ID != cm.ID {
 			t.Fatalf("ListComments = %d, %v", len(cs), err)
 		}
 	})
@@ -577,14 +629,14 @@ func TestMiscGetters(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, err := q.GetUser(ctx, u.ID); err != nil || got.ID != u.ID {
+		if got, err := q.GetUser(ctx, sqlitegen.GetUserParams{ID: u.ID, WorkspaceID: ws.ID}); err != nil || got.ID != u.ID {
 			t.Fatalf("GetUser = %+v, %v", got, err)
 		}
 		p, err := q.CreateProject(ctx, sqlitegen.CreateProjectParams{ID: id.New(), WorkspaceID: ws.ID, Key: "MSC", Name: "P", CreatedAt: 1, UpdatedAt: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, err := q.GetProject(ctx, p.ID); err != nil || got.ID != p.ID {
+		if got, err := q.GetProject(ctx, sqlitegen.GetProjectParams{ID: p.ID, WorkspaceID: ws.ID}); err != nil || got.ID != p.ID {
 			t.Fatalf("GetProject = %+v, %v", got, err)
 		}
 		if got, err := q.GetProjectByKey(ctx, sqlitegen.GetProjectByKeyParams{WorkspaceID: ws.ID, Key: "MSC"}); err != nil || got.ID != p.ID {
