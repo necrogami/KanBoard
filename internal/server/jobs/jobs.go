@@ -5,6 +5,7 @@
 package jobs
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/necrogami/kanboard/internal/core/clock"
@@ -173,6 +175,20 @@ func (r *Runner) RunOnce(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// Postgres does not carry the subquery's ORDER BY through UPDATE ...
+	// RETURNING, so the leased batch comes back in an arbitrary order on
+	// that engine. Restore the queue order here, where both engines agree:
+	// run_at first, then created_at, then the UUIDv7 id, which is
+	// time-ordered and so breaks a same-millisecond tie by enqueue order.
+	slices.SortFunc(rows, func(a, b sqlitegen.Job) int {
+		if c := cmp.Compare(a.RunAt, b.RunAt); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(a.CreatedAt, b.CreatedAt); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
 	for _, row := range rows {
 		r.runOne(ctx, row)
 	}

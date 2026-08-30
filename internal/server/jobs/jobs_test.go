@@ -66,17 +66,13 @@ func TestOutboxJobsRunAfterCommit(t *testing.T) {
 		if err != nil || n != 2 {
 			t.Fatalf("RunOnce = %d, %v (workspace.created and member.added expected)", n, err)
 		}
-		// Both jobs share the same run_at (millisecond), so which one
-		// LeaseJobs returns first is engine-dependent: Postgres's
-		// UPDATE ... RETURNING does not preserve the subquery's ORDER BY
-		// (only SQLite's physical scan order happens to match it), so
-		// assert the set of payloads rather than their order.
-		seen := map[string]bool{}
-		for _, p := range rec.seen {
-			seen[p] = true
-		}
-		if len(rec.seen) != 2 || !seen["workspace.created"] || !seen["member.added"] {
-			t.Fatalf("seen = %v", rec.seen)
+		// Postgres's UPDATE ... RETURNING does not carry the subquery's
+		// ORDER BY through to the returned rows, so RunOnce sorts the
+		// leased batch by (run_at, created_at, id) before running it. Both
+		// jobs share a millisecond, so the UUIDv7 id is the tie-break and
+		// the enqueue order holds on both engines.
+		if len(rec.seen) != 2 || rec.seen[0] != "workspace.created" || rec.seen[1] != "member.added" {
+			t.Fatalf("seen = %v, want [workspace.created member.added]", rec.seen)
 		}
 		rows, _ := st.Q().ListJobsByState(ctx, sqlitegen.ListJobsByStateParams{State: "done", Lim: 10})
 		if len(rows) != 2 || rows[0].WorkspaceID.String != ws.ID {
