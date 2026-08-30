@@ -54,16 +54,30 @@ func envOr(key, def string) string {
 	return def
 }
 
+// splitSubcommand returns the subcommand and the arguments with it
+// removed. flag.Parse stops at the first non-flag argument, so parsing
+// once would leave "--db" unread in "migrate up --db kanboard.db"; the
+// first pass is only there to find where the subcommand is.
+func splitSubcommand(args []string, def string) (string, []string) {
+	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.String("db", "", "")
+	if err := fs.Parse(args); err != nil || fs.NArg() == 0 {
+		return def, args
+	}
+	rest := make([]string, 0, len(args)-1)
+	rest = append(rest, args[:len(args)-fs.NArg()]...)
+	rest = append(rest, fs.Args()[1:]...)
+	return fs.Arg(0), rest
+}
+
 func migrate(args []string, stdout, stderr io.Writer) int {
+	sub, args := splitSubcommand(args, "up")
 	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	db := fs.String("db", envOr("KANBOARD_DB", "kanboard.db"), "SQLite path or postgres:// DSN")
 	if err := fs.Parse(args); err != nil {
 		return 2
-	}
-	sub := "up"
-	if fs.NArg() > 0 {
-		sub = fs.Arg(0)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -96,6 +110,7 @@ func migrate(args []string, stdout, stderr io.Writer) int {
 		return 0
 	default:
 		_, _ = fmt.Fprintf(stderr, "board migrate: unknown subcommand %q\n", sub)
+		usage(stderr)
 		return 2
 	}
 }
