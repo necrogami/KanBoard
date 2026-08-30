@@ -43,7 +43,7 @@ func OpenSQLite(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { _ = st.Close() })
 	if err := st.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -72,9 +72,9 @@ func OpenPostgres(t *testing.T, dsn string) *store.Store {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		st.Close()
+		_ = st.Close()
 		_, _ = base.ExecContext(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
-		base.Close()
+		_ = base.Close()
 	})
 	if err := st.Migrate(ctx); err != nil {
 		t.Fatal(err)

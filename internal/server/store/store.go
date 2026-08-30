@@ -106,7 +106,7 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 		}
 		db.SetMaxOpenConns(16)
 		if err := db.PingContext(ctx); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("store: postgres ping: %w", err)
 		}
 		return &Store{DB: db, Dialect: Postgres, newQ: func(d sqlitegen.DBTX) Querier { return newPGQuerier(d) }}, nil
@@ -124,16 +124,16 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 		db.SetMaxOpenConns(4)
 	}
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("store: sqlite ping: %w", err)
 	}
 	var check string
 	if err := db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&check); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("store: integrity check: %w", err)
 	}
 	if check != "ok" {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("%w: %s", ErrIntegrity, check)
 	}
 	st := &Store{DB: db, Dialect: SQLite, path: sqlitePath(dsn), newQ: func(d sqlitegen.DBTX) Querier { return sqlitegen.New(d) }}

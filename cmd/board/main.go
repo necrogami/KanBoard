@@ -24,9 +24,9 @@ func main() {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: board <command> [flags]")
-	fmt.Fprintln(w, "  version                 print version")
-	fmt.Fprintln(w, "  migrate [up|status]     apply or inspect migrations (--db, KANBOARD_DB)")
+	_, _ = fmt.Fprintln(w, "usage: board <command> [flags]")
+	_, _ = fmt.Fprintln(w, "  version                 print version")
+	_, _ = fmt.Fprintln(w, "  migrate [up|status]     apply or inspect migrations (--db, KANBOARD_DB)")
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
@@ -36,12 +36,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	switch args[0] {
 	case "version":
-		fmt.Fprintf(stdout, "board %s (%s)\n", version, commit)
+		_, _ = fmt.Fprintf(stdout, "board %s (%s)\n", version, commit)
 		return 0
 	case "migrate":
 		return migrate(args[1:], stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "board: unknown command %q\n", args[0])
+		_, _ = fmt.Fprintf(stderr, "board: unknown command %q\n", args[0])
 		usage(stderr)
 		return 2
 	}
@@ -69,29 +69,29 @@ func migrate(args []string, stdout, stderr io.Writer) int {
 	defer cancel()
 	st, err := store.Open(ctx, *db)
 	if err != nil {
-		fmt.Fprintln(stderr, "board:", err)
+		_, _ = fmt.Fprintln(stderr, "board:", err)
 		return 1
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	switch sub {
 	case "up":
 		if err := st.Migrate(ctx); err != nil {
-			fmt.Fprintln(stderr, "board:", err)
+			_, _ = fmt.Fprintln(stderr, "board:", err)
 			return 1
 		}
 		cur, latest, _ := st.Status(ctx)
-		fmt.Fprintf(stdout, "migrated to %d/%d (%s)\n", cur, latest, st.Dialect)
+		_, _ = fmt.Fprintf(stdout, "migrated to %d/%d (%s)\n", cur, latest, st.Dialect)
 		return 0
 	case "status":
 		cur, latest, err := st.Status(ctx)
 		if err != nil {
-			fmt.Fprintln(stderr, "board:", err)
+			_, _ = fmt.Fprintln(stderr, "board:", err)
 			return 1
 		}
-		fmt.Fprintf(stdout, "schema %d/%d (%s)\n", cur, latest, st.Dialect)
+		_, _ = fmt.Fprintf(stdout, "schema %d/%d (%s)\n", cur, latest, st.Dialect)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "board migrate: unknown subcommand %q\n", sub)
+		_, _ = fmt.Fprintf(stderr, "board migrate: unknown subcommand %q\n", sub)
 		return 2
 	}
 }

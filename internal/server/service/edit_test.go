@@ -85,7 +85,7 @@ func TestArchiveRestoreAndSearch(t *testing.T) {
 			t.Fatalf("archive: %+v, %v", a, err)
 		}
 		_, err = h.svc.ArchiveCard(ctx, h.admin, commands.ArchiveCard{CardKey: cards[0].Key})
-		code(t, err, service.CodeConflict)
+		_ = code(t, err, service.CodeConflict)
 		found, cursor, err := h.svc.SearchCards(ctx, h.admin, "ARC", filter.Filter{})
 		if err != nil || len(found) != 1 || cursor != "" || found[0].Key != cards[1].Key {
 			t.Fatalf("search active = %+v, %q, %v", found, cursor, err)
@@ -119,9 +119,9 @@ func TestCommentsLabelsAssignees(t *testing.T) {
 			t.Fatalf("labels = %+v, %v", c, err)
 		}
 		_, err = h.svc.SetCardLabels(ctx, h.admin, commands.SetCardLabels{Meta: commands.Meta{ExpectedVersion: cards[0].Version}, CardKey: cards[0].Key})
-		code(t, err, service.CodeConflict)
+		_ = code(t, err, service.CodeConflict)
 		_, err = h.svc.SetCardLabels(ctx, h.admin, commands.SetCardLabels{CardKey: cards[0].Key, LabelIDs: []string{"not-a-label"}})
-		code(t, err, service.CodeValidation)
+		_ = code(t, err, service.CodeValidation)
 		c, err = h.svc.SetCardLabels(ctx, h.admin, commands.SetCardLabels{CardKey: cards[0].Key})
 		if err != nil || len(c.LabelIDs) != 0 {
 			t.Fatalf("clear labels = %+v, %v", c, err)
@@ -145,7 +145,7 @@ func TestCommentsLabelsAssignees(t *testing.T) {
 			t.Fatalf("no-op assignees bumped version: %d -> %d, %v", noopAssigneeVersion, c.Version, err)
 		}
 		_, err = h.svc.SetAssignees(ctx, h.admin, commands.SetAssignees{CardKey: cards[0].Key, UserIDs: []string{"stranger"}})
-		code(t, err, service.CodeValidation)
+		_ = code(t, err, service.CodeValidation)
 		card, comments, err := h.svc.GetCard(ctx, h.admin, cards[0].Key)
 		if err != nil || len(comments) != 1 || len(card.AssigneeIDs) != 1 {
 			t.Fatalf("get = %+v, %d comments, %v", card, len(comments), err)
@@ -166,6 +166,6 @@ func TestCreateLabelDuplicateNameIsConflict(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err := h.svc.CreateLabel(ctx, h.admin, commands.CreateLabel{ProjectID: p.ID, Name: "bug", Color: "#00FF00"})
-		code(t, err, service.CodeConflict)
+		_ = code(t, err, service.CodeConflict)
 	})
 }

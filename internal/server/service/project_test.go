@@ -65,7 +65,7 @@ func TestCreateWorkspaceBootstrapsAdmin(t *testing.T) {
 			t.Fatalf("admin role = %q", h.admin.WorkspaceRole)
 		}
 		_, err := h.svc.CreateWorkspace(context.Background(), commands.CreateWorkspace{Name: "Second", Slug: "second", AdminEmail: "b@acme.test", AdminName: "B"})
-		code(t, err, service.CodeConflict)
+		_ = code(t, err, service.CodeConflict)
 	})
 }
 
@@ -119,7 +119,7 @@ func TestCreateProjectDuplicateKeyConflicts(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err := h.svc.CreateProject(ctx, h.admin, commands.CreateProject{WorkspaceID: h.ws.ID, Key: "DUP", Name: "Two"})
-		code(t, err, service.CodeConflict)
+		_ = code(t, err, service.CodeConflict)
 	})
 }
 
@@ -167,7 +167,7 @@ func TestLoadActorPaths(t *testing.T) {
 			}
 		}
 		_, err = h.svc.LoadActor(ctx, h.ws.ID, h.ws.AdminUserID, nil)
-		code(t, err, service.CodeForbidden)
+		_ = code(t, err, service.CodeForbidden)
 	})
 }
 
@@ -179,7 +179,7 @@ func TestIdempotencyKeyReusedForDifferentCommandConflicts(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err := h.svc.CreateProject(ctx, h.admin, commands.CreateProject{Meta: commands.Meta{IdempotencyKey: "reused"}, WorkspaceID: h.ws.ID, Key: "REUSE", Name: "x"})
-		code(t, err, service.CodeConflict)
+		_ = code(t, err, service.CodeConflict)
 	})
 }
 
@@ -188,7 +188,7 @@ func TestCreateProjectForbiddenForOutsider(t *testing.T) {
 		h := newHarness(t, st)
 		outsider := policy.Actor{UserID: "nobody", WorkspaceID: h.ws.ID, Kind: policy.KindHuman}
 		_, err := h.svc.CreateProject(context.Background(), outsider, commands.CreateProject{WorkspaceID: h.ws.ID, Key: "NOPE", Name: "x"})
-		code(t, err, service.CodeForbidden)
+		_ = code(t, err, service.CodeForbidden)
 		var n int
 		if err := st.DB.QueryRow("SELECT count(*) FROM event WHERE kind = 'project.created'").Scan(&n); err != nil || n != 0 {
 			t.Fatalf("events after forbidden = %d", n)

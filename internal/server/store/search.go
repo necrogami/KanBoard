@@ -65,7 +65,7 @@ func SearchCards(ctx context.Context, db sqlitegen.DBTX, d Dialect, projectID st
 	if err != nil {
 		return nil, "", err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []sqlitegen.Card
 	for rows.Next() {
 		var c sqlitegen.Card

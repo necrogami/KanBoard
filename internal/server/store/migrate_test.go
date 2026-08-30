@@ -21,7 +21,7 @@ func openSQLite(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { _ = st.Close() })
 	return st
 }
 
@@ -62,7 +62,7 @@ func TestOpenFileDatabaseEnforcesPragmas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	var mode string
 	if err := st.DB.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&mode); err != nil || mode != "wal" {
 		t.Fatalf("journal_mode = %q, %v", mode, err)
@@ -87,7 +87,7 @@ func TestOpenRecognisesColonMemoryDSN(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	if _, err := st.DB.ExecContext(ctx, "CREATE TABLE t (x INTEGER)"); err != nil {
 		t.Fatal("create:", err)
 	}
@@ -131,7 +131,7 @@ func TestBackupSQLiteFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	if err := st.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestBackupSQLiteFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer copy.Close()
+	defer func() { _ = copy.Close() }()
 	cur, latest, err := copy.Status(ctx)
 	if err != nil || cur != latest {
 		t.Fatalf("backup status = %d/%d %v", cur, latest, err)
@@ -180,7 +180,7 @@ func TestBackupSucceedsAfterRemovingStaleBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	if err := st.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}

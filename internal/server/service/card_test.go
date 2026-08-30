@@ -64,7 +64,7 @@ func TestCreateCardNumbersAndOrders(t *testing.T) {
 				t.Fatalf("card not in first column")
 			}
 		}
-		if !(cards[0].Position < cards[1].Position && cards[1].Position < cards[2].Position) {
+		if cards[0].Position >= cards[1].Position || cards[1].Position >= cards[2].Position {
 			t.Fatalf("positions %q %q %q", cards[0].Position, cards[1].Position, cards[2].Position)
 		}
 	})
@@ -99,7 +99,7 @@ func TestCreateCardInNamedColumnAndForbidden(t *testing.T) {
 
 		viewer := policy.Actor{UserID: "v", WorkspaceID: h.ws.ID, WorkspaceRole: policy.WorkspaceMember, ProjectRoles: map[string]policy.ProjectRole{p.ID: policy.ProjectViewer}}
 		_, err = h.svc.CreateCard(ctx, viewer, commands.CreateCard{ProjectID: p.ID, Title: "nope"})
-		code(t, err, service.CodeForbidden)
+		_ = code(t, err, service.CodeForbidden)
 	})
 }
 
@@ -116,7 +116,7 @@ func TestMoveCardBetweenAndAcrossColumns(t *testing.T) {
 		if err != nil || soft {
 			t.Fatal(err, soft)
 		}
-		if !(cards[0].Position < moved.Position && moved.Position < cards[1].Position) {
+		if cards[0].Position >= moved.Position || moved.Position >= cards[1].Position {
 			t.Fatalf("position %q not between %q and %q", moved.Position, cards[0].Position, cards[1].Position)
 		}
 		if moved.Version != cards[2].Version+1 {
@@ -173,7 +173,7 @@ func TestMoveCardVersionConflict(t *testing.T) {
 		// Forbidden beats conflict: a viewer with a stale version sees E_FORBIDDEN.
 		viewer := policy.Actor{UserID: "v", WorkspaceID: h.ws.ID, WorkspaceRole: policy.WorkspaceMember, ProjectRoles: map[string]policy.ProjectRole{cards[0].ProjectID: policy.ProjectViewer}}
 		_, _, err = h.svc.MoveCard(ctx, viewer, commands.MoveCard{Meta: commands.Meta{ExpectedVersion: 99}, CardKey: cards[0].Key, ColumnID: b.Columns[1].ID})
-		code(t, err, service.CodeForbidden)
+		_ = code(t, err, service.CodeForbidden)
 	})
 }
 
@@ -259,6 +259,6 @@ func TestMoveCardRejectsForeignColumn(t *testing.T) {
 		_, _, cards := projectWithCards(t, h, "AAA", 1)
 		_, other, _ := projectWithCards(t, h, "BBB", 0)
 		_, _, err := h.svc.MoveCard(ctx, h.admin, commands.MoveCard{CardKey: cards[0].Key, ColumnID: other.Columns[0].ID})
-		code(t, err, service.CodeValidation)
+		_ = code(t, err, service.CodeValidation)
 	})
 }

@@ -34,7 +34,7 @@ func main() {
 		}
 	}
 	if iface == nil {
-		fail(fmt.Errorf("Querier interface not found"))
+		fail(fmt.Errorf("querier interface not found"))
 	}
 
 	var b bytes.Buffer
