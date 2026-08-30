@@ -97,6 +97,22 @@ func New(st *store.Store, opts ...Option) *Service {
 	return s
 }
 
+// Subscribe returns a bus subscription that carries only the events
+// actor is allowed to read: workspace membership does not imply project
+// membership, and an unfiltered workspace stream would hand a member the
+// titles of cards in projects they have no role on. The Evicted signal
+// and Close behave exactly as on a raw bus subscription.
+//
+// It returns nil when the service was built without a bus.
+func (s *Service) Subscribe(actor policy.Actor) *bus.Sub {
+	if s.bus == nil {
+		return nil
+	}
+	return s.bus.SubscribeFunc(actor.WorkspaceID, func(ev events.Event) bool {
+		return policy.Can(actor, policy.ProjectRead, policy.Resource{ProjectID: ev.ProjectID, BoardID: ev.BoardID})
+	})
+}
+
 // Tx is the per-command transaction context handed to command bodies.
 type Tx struct {
 	ctx    context.Context
