@@ -53,3 +53,49 @@ func TestNormalizeRejectsAssigneeIDsOverMax(t *testing.T) {
 		t.Fatal("51 assignee ids accepted")
 	}
 }
+
+// FuzzFilterNormalize checks that Normalize survives any input without
+// panicking and is idempotent: the filter it produces normalizes to
+// itself. Normalize is the boundary every adapter runs untrusted input
+// through, and plan 3 normalizes once and then hands the result to the
+// store, so a second pass must not change it (spec 12.2 asks for a fuzz
+// target on the filter).
+func FuzzFilterNormalize(f *testing.F) {
+	f.Add("hello", 0, 0)
+	f.Add("  padded  ", 500, 3)
+	f.Add(strings.Repeat("x", 201), -1, 51)
+	f.Add("", 200, 50)
+	f.Fuzz(func(t *testing.T, text string, limit, ids int) {
+		if ids < 0 || ids > 100 {
+			return
+		}
+		build := func() filter.Filter {
+			return filter.Filter{Text: text, Limit: limit, ColumnIDs: make([]string, ids), LabelIDs: make([]string, ids), AssigneeIDs: make([]string, ids)}
+		}
+		got := build()
+		if err := got.Normalize(); err != nil {
+			// A rejected filter must be rejected for the same reason twice.
+			again := build()
+			if err2 := again.Normalize(); err2 == nil || err2.Error() != err.Error() {
+				t.Fatalf("second Normalize = %v, first = %v", err2, err)
+			}
+			return
+		}
+		if got.Limit < 1 || got.Limit > filter.MaxLimit {
+			t.Fatalf("limit = %d after Normalize", got.Limit)
+		}
+		if len(got.Text) > filter.MaxText {
+			t.Fatalf("text is %d bytes after Normalize", len(got.Text))
+		}
+		if strings.TrimSpace(got.Text) != got.Text {
+			t.Fatalf("text %q is not trimmed", got.Text)
+		}
+		second := got
+		if err := second.Normalize(); err != nil {
+			t.Fatalf("normalized filter rejected on the second pass: %v", err)
+		}
+		if second.Text != got.Text || second.Limit != got.Limit {
+			t.Fatalf("Normalize is not idempotent: %+v then %+v", got, second)
+		}
+	})
+}

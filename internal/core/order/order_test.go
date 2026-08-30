@@ -118,3 +118,42 @@ func FuzzBetween(f *testing.F) {
 		}
 	})
 }
+
+// FuzzRebalance checks the three properties the rank.rebalance job
+// depends on for any n: the keys come back in strictly ascending order,
+// there are exactly n of them, and none is long enough to need another
+// rebalance immediately (spec 12.2 asks for a fuzz target on rebalance
+// order preservation).
+func FuzzRebalance(f *testing.F) {
+	for _, n := range []int{0, 1, 2, 3, 61, 62, 63, 1000} {
+		f.Add(n)
+	}
+	f.Fuzz(func(t *testing.T, n int) {
+		// Rebalance allocates n keys, so cap what the fuzzer may ask for;
+		// the property does not depend on the size.
+		if n < 0 || n > 5000 {
+			return
+		}
+		keys := order.Rebalance(n)
+		if len(keys) != n {
+			t.Fatalf("Rebalance(%d) returned %d keys", n, len(keys))
+		}
+		for i, k := range keys {
+			if k == "" {
+				t.Fatalf("Rebalance(%d)[%d] is empty", n, i)
+			}
+			if strings.HasSuffix(k, "0") {
+				t.Fatalf("Rebalance(%d)[%d] = %q ends in 0, leaving no room after it", n, i, k)
+			}
+			if len(k) > order.MaxKeyLen {
+				t.Fatalf("Rebalance(%d)[%d] = %q is longer than MaxKeyLen", n, i, k)
+			}
+			if strings.ContainsFunc(k, func(r rune) bool { return !strings.ContainsRune(order.Alphabet, r) }) {
+				t.Fatalf("Rebalance(%d)[%d] = %q is outside the alphabet", n, i, k)
+			}
+			if i > 0 && keys[i-1] >= k {
+				t.Fatalf("Rebalance(%d) not ascending at %d: %q >= %q", n, i, keys[i-1], k)
+			}
+		}
+	})
+}
