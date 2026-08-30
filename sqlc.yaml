@@ -1,0 +1,23 @@
+version: "2"
+sql:
+  - engine: "sqlite"
+    schema: "migrations/sqlite"
+    queries: "internal/server/store/queries"
+    gen:
+      go:
+        package: "sqlitegen"
+        out: "internal/server/store/sqlitegen"
+        emit_interface: true
+        emit_empty_slices: true
+        emit_exact_table_names: true
+  - engine: "postgresql"
+    schema: "migrations/postgres"
+    queries: "internal/server/store/queries"
+    gen:
+      go:
+        package: "pggen"
+        out: "internal/server/store/pggen"
+        sql_package: "database/sql"
+        emit_interface: true
+        emit_empty_slices: true
+        emit_exact_table_names: true

@@ -1,0 +1,549 @@
+package service
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"time"
+
+	"github.com/necrogami/kanboard/internal/core/clock"
+	"github.com/necrogami/kanboard/internal/core/commands"
+	"github.com/necrogami/kanboard/internal/core/events"
+	"github.com/necrogami/kanboard/internal/core/filter"
+	"github.com/necrogami/kanboard/internal/core/id"
+	"github.com/necrogami/kanboard/internal/core/keys"
+	"github.com/necrogami/kanboard/internal/core/order"
+	"github.com/necrogami/kanboard/internal/core/policy"
+	"github.com/necrogami/kanboard/internal/server/jobkind"
+	"github.com/necrogami/kanboard/internal/server/store"
+	"github.com/necrogami/kanboard/internal/server/store/sqlitegen"
+)
+
+// loadCard resolves PROJ-42 within the actor's workspace.
+func (t *Tx) loadCard(key string) (sqlitegen.Card, sqlitegen.Project, error) {
+	projectKey, number, err := keys.ParseCard(key)
+	if err != nil {
+		return sqlitegen.Card{}, sqlitegen.Project{}, validation(err)
+	}
+	p, err := t.Q.GetProjectByKey(t.ctx, sqlitegen.GetProjectByKeyParams{WorkspaceID: t.actor.WorkspaceID, Key: projectKey})
+	if isNoRows(err) {
+		return sqlitegen.Card{}, sqlitegen.Project{}, notFound("card")
+	}
+	if err != nil {
+		return sqlitegen.Card{}, sqlitegen.Project{}, err
+	}
+	c, err := t.Q.GetCardByNumber(t.ctx, sqlitegen.GetCardByNumberParams{ProjectID: p.ID, WorkspaceID: t.actor.WorkspaceID, Number: number})
+	if isNoRows(err) {
+		return sqlitegen.Card{}, sqlitegen.Project{}, notFound("card")
+	}
+	if err != nil {
+		return sqlitegen.Card{}, sqlitegen.Project{}, err
+	}
+	return c, p, nil
+}
+
+func (t *Tx) checkVersion(current int64) error {
+	if t.meta.ExpectedVersion != 0 && t.meta.ExpectedVersion != current {
+		return conflict("card was modified", current)
+	}
+	return nil
+}
+
+// cardResult builds the DTO including labels and assignees.
+func (t *Tx) cardResult(p sqlitegen.Project, c sqlitegen.Card) (Card, error) {
+	labels, err := t.Q.ListCardLabelIDs(t.ctx, sqlitegen.ListCardLabelIDsParams{CardID: c.ID, WorkspaceID: t.actor.WorkspaceID})
+	if err != nil {
+		return Card{}, err
+	}
+	assignees, err := t.Q.ListCardAssigneeIDs(t.ctx, sqlitegen.ListCardAssigneeIDsParams{CardID: c.ID, WorkspaceID: t.actor.WorkspaceID})
+	if err != nil {
+		return Card{}, err
+	}
+	return cardDTO(p.Key, c, labels, assignees), nil
+}
+
+// positionOrEmpty turns sql.ErrNoRows into the open bound.
+func positionOrEmpty(pos string, err error) (string, error) {
+	if isNoRows(err) {
+		return "", nil
+	}
+	return pos, err
+}
+
+// CreateCard adds a card at the bottom of a column.
+func (s *Service) CreateCard(ctx context.Context, actor policy.Actor, cmd commands.CreateCard) (Card, error) {
+	if err := cmd.Validate(); err != nil {
+		return Card{}, validation(err)
+	}
+	var out Card
+	err := s.run(ctx, actor, cmd.Meta, "CreateCard", &out, func(tx *Tx) error {
+		p, err := tx.Q.GetProject(tx.ctx, sqlitegen.GetProjectParams{ID: cmd.ProjectID, WorkspaceID: actor.WorkspaceID})
+		if isNoRows(err) {
+			return notFound("project")
+		}
+		if err != nil {
+			return err
+		}
+		b, err := tx.Q.GetBoardByProject(tx.ctx, sqlitegen.GetBoardByProjectParams{ProjectID: p.ID, WorkspaceID: actor.WorkspaceID})
+		if err != nil {
+			return err
+		}
+		if err := tx.can(policy.CardCreate, policy.Resource{ProjectID: p.ID, BoardID: b.ID}); err != nil {
+			return err
+		}
+		var col sqlitegen.BoardColumn
+		if cmd.ColumnID == "" {
+			cols, err := tx.Q.ListColumns(tx.ctx, sqlitegen.ListColumnsParams{BoardID: b.ID, WorkspaceID: actor.WorkspaceID})
+			if err != nil {
+				return err
+			}
+			if len(cols) == 0 {
+				return validation(errors.New("board has no columns"))
+			}
+			col = cols[0]
+		} else {
+			col, err = tx.Q.GetColumn(tx.ctx, sqlitegen.GetColumnParams{ID: cmd.ColumnID, WorkspaceID: actor.WorkspaceID})
+			if isNoRows(err) || (err == nil && (col.BoardID != b.ID || col.ArchivedAt.Valid)) {
+				return validation(errors.New("column is not on this board"))
+			}
+			if err != nil {
+				return err
+			}
+		}
+		n, err := tx.Q.NextCardNumber(tx.ctx, sqlitegen.NextCardNumberParams{ID: p.ID, WorkspaceID: actor.WorkspaceID, UpdatedAt: tx.NowMs})
+		if err != nil {
+			return err
+		}
+		last, err := positionOrEmpty(tx.Q.LastPositionInColumn(tx.ctx, sqlitegen.LastPositionInColumnParams{ColumnID: col.ID, WorkspaceID: actor.WorkspaceID}))
+		if err != nil {
+			return err
+		}
+		pos, err := order.Between(last, "")
+		if err != nil {
+			return err
+		}
+		if err := tx.maybeRebalance(p.WorkspaceID, col.ID, pos); err != nil {
+			return err
+		}
+		c, err := tx.Q.CreateCard(tx.ctx, sqlitegen.CreateCardParams{
+			ID: s.newID(), WorkspaceID: p.WorkspaceID, ProjectID: p.ID, BoardID: b.ID, ColumnID: col.ID,
+			Number: n, Title: cmd.Title, Description: cmd.Description, Position: pos, DueDate: nullMs(cmd.DueDate),
+			CreatedBy: actor.UserID, CreatedAt: tx.NowMs, UpdatedAt: tx.NowMs,
+		})
+		if err != nil {
+			return err
+		}
+		if err := tx.emit(events.CardCreated, scope{WorkspaceID: p.WorkspaceID, ProjectID: p.ID, BoardID: b.ID, CardID: c.ID},
+			events.CardCreatedPayload{Number: n, Title: c.Title, ColumnID: col.ID, ColumnName: col.Name}); err != nil {
+			return err
+		}
+		out, err = tx.cardResult(p, c)
+		return err
+	})
+	return out, err
+}
+
+// errSameSpot signals that the card is already where the caller asked.
+var errSameSpot = errors.New("same spot")
+
+// isNotFound reports whether err is a service E_NOT_FOUND.
+func isNotFound(err error) bool {
+	var se *Error
+	return errors.As(err, &se) && se.Code == CodeNotFound
+}
+
+// versioned turns the zero-rows result of a "WHERE version = ?" update
+// into E_CONFLICT carrying the version now stored.
+func (t *Tx) versioned(id string, row sqlitegen.Card, err error) (sqlitegen.Card, error) {
+	if !isNoRows(err) {
+		return row, err
+	}
+	cur, gerr := t.Q.GetCard(t.ctx, sqlitegen.GetCardParams{ID: id, WorkspaceID: t.actor.WorkspaceID})
+	if isNoRows(gerr) {
+		return sqlitegen.Card{}, notFound("card")
+	}
+	if gerr != nil {
+		return sqlitegen.Card{}, gerr
+	}
+	return sqlitegen.Card{}, conflict("card was modified", cur.Version)
+}
+
+// maybeRebalance enqueues rank.rebalance for a column whose keys have
+// grown past order.MaxKeyLen (spec 4.4). The row commits with the
+// mutation; plan 7 registers the handler.
+//
+// Keys only grow, so once a column crosses the limit every later create
+// or move in it would enqueue the same job again. The insert is skipped
+// while an identical job is still queued; the check runs in the mutation
+// transaction, which is the same transaction the insert would run in.
+func (t *Tx) maybeRebalance(workspaceID, columnID, pos string) error {
+	if len(pos) <= order.MaxKeyLen {
+		return nil
+	}
+	payload := `{"column_id":"` + columnID + `"}`
+	queued, err := t.Q.CountQueuedJobs(t.ctx, sqlitegen.CountQueuedJobsParams{Kind: jobkind.RankRebalance, Payload: payload})
+	if err != nil {
+		return err
+	}
+	if queued > 0 {
+		return nil
+	}
+	return t.Q.InsertJob(t.ctx, sqlitegen.InsertJobParams{
+		ID: t.s.newID(), WorkspaceID: nullStr(workspaceID), Kind: jobkind.RankRebalance,
+		Payload: payload, MaxAttempts: jobkind.DefaultMaxAttempts, RunAt: t.NowMs, CreatedAt: t.NowMs,
+	})
+}
+
+// neighbourSkippingSelf finds the neighbour position on one side of
+// anchor within column, skipping selfPos (the moving card's own position
+// when it already lives in that column; empty otherwise). after=true
+// looks above anchor; false looks below.
+func neighbourSkippingSelf(tx *Tx, column, anchor, selfPos string, after bool) (string, error) {
+	next := func(from string) (string, error) {
+		if after {
+			return positionOrEmpty(tx.Q.NextPositionAfter(tx.ctx, sqlitegen.NextPositionAfterParams{ColumnID: column, WorkspaceID: tx.actor.WorkspaceID, Position: from}))
+		}
+		return positionOrEmpty(tx.Q.PrevPositionBefore(tx.ctx, sqlitegen.PrevPositionBeforeParams{ColumnID: column, WorkspaceID: tx.actor.WorkspaceID, Position: from}))
+	}
+	pos, err := next(anchor)
+	if err != nil || selfPos == "" || pos != selfPos {
+		return pos, err
+	}
+	return next(selfPos)
+}
+
+// moveBounds returns the positions the moved card must land between.
+// soft is true when a named sibling was missing, archived or in another
+// column and the card goes to the bottom instead (spec 4.5). Archived
+// cards keep their positions and may serve as neighbours; that only
+// affects where an invisible card sits.
+func moveBounds(tx *Tx, to sqlitegen.BoardColumn, moving sqlitegen.Card, cmd commands.MoveCard) (lower, upper string, soft bool, err error) {
+	// Positions are unique per column only, so the moving card's own
+	// position is skipped only when it is already in the target column.
+	selfPos := ""
+	if moving.ColumnID == to.ID {
+		selfPos = moving.Position
+	}
+	key, after := cmd.AfterKey, true
+	if cmd.BeforeKey != "" {
+		key, after = cmd.BeforeKey, false
+	}
+	if key != "" {
+		anchor, _, err := tx.loadCard(key)
+		switch {
+		case err != nil && !isNotFound(err):
+			return "", "", false, err
+		case err == nil && anchor.ID == moving.ID && moving.ColumnID == to.ID:
+			// Anchored to itself, in the column it already sits in: the
+			// request asks for nothing.
+			return "", "", false, errSameSpot
+		case err == nil && anchor.ID == moving.ID:
+			// Anchored to itself but asked for another column. The anchor
+			// cannot be honoured, so this is the missing-sibling case: the
+			// column change still applies, at the bottom, and the caller is
+			// told the placement was not the one it asked for.
+			soft = true
+		case err == nil && anchor.ColumnID == to.ID && !anchor.ArchivedAt.Valid:
+			if after {
+				upper, err := neighbourSkippingSelf(tx, to.ID, anchor.Position, selfPos, true)
+				return anchor.Position, upper, false, err
+			}
+			lower, err := neighbourSkippingSelf(tx, to.ID, anchor.Position, selfPos, false)
+			return lower, anchor.Position, false, err
+		default:
+			soft = true
+		}
+	}
+	if cmd.Position == commands.PositionTop && !soft {
+		upper, err = positionOrEmpty(tx.Q.FirstPositionInColumn(tx.ctx, sqlitegen.FirstPositionInColumnParams{ColumnID: to.ID, WorkspaceID: tx.actor.WorkspaceID}))
+		if err == nil && selfPos != "" && upper == selfPos {
+			upper, err = positionOrEmpty(tx.Q.NextPositionAfter(tx.ctx, sqlitegen.NextPositionAfterParams{ColumnID: to.ID, WorkspaceID: tx.actor.WorkspaceID, Position: selfPos}))
+		}
+		return "", upper, false, err
+	}
+	lower, err = positionOrEmpty(tx.Q.LastPositionInColumn(tx.ctx, sqlitegen.LastPositionInColumnParams{ColumnID: to.ID, WorkspaceID: tx.actor.WorkspaceID}))
+	if err == nil && selfPos != "" && lower == selfPos {
+		lower, err = positionOrEmpty(tx.Q.PrevPositionBefore(tx.ctx, sqlitegen.PrevPositionBeforeParams{ColumnID: to.ID, WorkspaceID: tx.actor.WorkspaceID, Position: selfPos}))
+	}
+	return lower, "", soft, err
+}
+
+// MoveCard places a card in a column at the requested spot. The server
+// computes the fractional key; callers never send one. The returned
+// bool is the soft-conflict flag described on moveBounds.
+func (s *Service) MoveCard(ctx context.Context, actor policy.Actor, cmd commands.MoveCard) (Card, bool, error) {
+	if err := cmd.Validate(); err != nil {
+		return Card{}, false, validation(err)
+	}
+	var out Card
+	var soft bool
+	err := s.run(ctx, actor, cmd.Meta, "MoveCard", &out, func(tx *Tx) error {
+		c, p, err := tx.loadCard(cmd.CardKey)
+		if err != nil {
+			return err
+		}
+		if err := tx.can(policy.CardMove, policy.Resource{ProjectID: p.ID, BoardID: c.BoardID}); err != nil {
+			return err
+		}
+		if err := tx.checkVersion(c.Version); err != nil {
+			return err
+		}
+		from, err := tx.Q.GetColumn(tx.ctx, sqlitegen.GetColumnParams{ID: c.ColumnID, WorkspaceID: actor.WorkspaceID})
+		if err != nil {
+			return err
+		}
+		to, err := tx.Q.GetColumn(tx.ctx, sqlitegen.GetColumnParams{ID: cmd.ColumnID, WorkspaceID: actor.WorkspaceID})
+		if isNoRows(err) || (err == nil && (to.BoardID != c.BoardID || to.ArchivedAt.Valid)) {
+			return validation(errors.New("column is not on this board"))
+		}
+		if err != nil {
+			return err
+		}
+		lower, upper, softHere, err := moveBounds(tx, to, c, cmd)
+		if errors.Is(err, errSameSpot) {
+			out, err = tx.cardResult(p, c)
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		pos, err := order.Between(lower, upper)
+		if err != nil {
+			return err
+		}
+		completed := c.CompletedAt
+		switch {
+		case to.Category == "done" && from.Category != "done":
+			completed = sql.NullInt64{Int64: tx.NowMs, Valid: true}
+		case to.Category != "done" && from.Category == "done":
+			completed = sql.NullInt64{}
+		}
+		movedRow, err := tx.Q.MoveCard(tx.ctx, sqlitegen.MoveCardParams{
+			ID: c.ID, WorkspaceID: actor.WorkspaceID, Version: c.Version, ColumnID: to.ID, Position: pos, CompletedAt: completed, UpdatedAt: tx.NowMs,
+		})
+		moved, err := tx.versioned(c.ID, movedRow, err)
+		if err != nil {
+			return err
+		}
+		if err := tx.maybeRebalance(p.WorkspaceID, to.ID, pos); err != nil {
+			return err
+		}
+		if err := tx.emit(events.CardMoved, scope{WorkspaceID: p.WorkspaceID, ProjectID: p.ID, BoardID: c.BoardID, CardID: c.ID},
+			events.CardMovedPayload{FromColumnID: from.ID, ToColumnID: to.ID, FromName: from.Name, ToName: to.Name, FromCategory: from.Category, ToCategory: to.Category}); err != nil {
+			return err
+		}
+		out, err = tx.cardResult(p, moved)
+		if err != nil {
+			return err
+		}
+		soft = softHere
+		return nil
+	})
+	return out, soft, err
+}
+
+// UpdateCard patches title, description and due date, emitting one
+// card.updated event per changed field.
+func (s *Service) UpdateCard(ctx context.Context, actor policy.Actor, cmd commands.UpdateCard) (Card, error) {
+	if err := cmd.Validate(); err != nil {
+		return Card{}, validation(err)
+	}
+	var out Card
+	err := s.run(ctx, actor, cmd.Meta, "UpdateCard", &out, func(tx *Tx) error {
+		c, p, err := tx.loadCard(cmd.CardKey)
+		if err != nil {
+			return err
+		}
+		if err := tx.can(policy.CardUpdate, policy.Resource{ProjectID: p.ID, BoardID: c.BoardID}); err != nil {
+			return err
+		}
+		if err := tx.checkVersion(c.Version); err != nil {
+			return err
+		}
+		sc := scope{WorkspaceID: p.WorkspaceID, ProjectID: p.ID, BoardID: c.BoardID, CardID: c.ID}
+		title, desc, due := c.Title, c.Description, c.DueDate
+		changed := false
+		if cmd.Title != nil && *cmd.Title != title {
+			if err := tx.emit(events.CardUpdated, sc, events.CardUpdatedPayload{Field: "title", Old: title, New: *cmd.Title}); err != nil {
+				return err
+			}
+			title, changed = *cmd.Title, true
+		}
+		if cmd.Description != nil && *cmd.Description != desc {
+			// Descriptions are up to 100 KB of user content, so the event
+			// records that the field changed, not the text. Titles are
+			// short display names and do carry their values; the rule is
+			// stated on the payload structs in internal/core/events.
+			if err := tx.emit(events.CardUpdated, sc, events.CardUpdatedPayload{Field: "description", Old: "", New: ""}); err != nil {
+				return err
+			}
+			desc, changed = *cmd.Description, true
+		}
+		if cmd.DueDate != nil || cmd.ClearDueDate {
+			newDue := nullMs(cmd.DueDate)
+			if newDue != due {
+				if err := tx.emit(events.CardUpdated, sc, events.CardUpdatedPayload{Field: "due_date", Old: msString(due), New: msString(newDue)}); err != nil {
+					return err
+				}
+				due, changed = newDue, true
+			}
+		}
+		if !changed {
+			// Nothing differs: no UPDATE, no version bump, no event.
+			out, err = tx.cardResult(p, c)
+			return err
+		}
+		updatedRow, err := tx.Q.UpdateCardFields(tx.ctx, sqlitegen.UpdateCardFieldsParams{ID: c.ID, WorkspaceID: actor.WorkspaceID, Version: c.Version, Title: title, Description: desc, DueDate: due, UpdatedAt: tx.NowMs})
+		updated, err := tx.versioned(c.ID, updatedRow, err)
+		if err != nil {
+			return err
+		}
+		out, err = tx.cardResult(p, updated)
+		return err
+	})
+	return out, err
+}
+
+func msString(v sql.NullInt64) string {
+	if !v.Valid {
+		return ""
+	}
+	return clock.FromMillis(v.Int64).Format(time.RFC3339)
+}
+
+func (s *Service) setArchived(ctx context.Context, actor policy.Actor, meta commands.Meta, kind, key string, archive bool) (Card, error) {
+	var out Card
+	err := s.run(ctx, actor, meta, kind, &out, func(tx *Tx) error {
+		c, p, err := tx.loadCard(key)
+		if err != nil {
+			return err
+		}
+		act, k := policy.CardArchive, events.CardArchived
+		if !archive {
+			act, k = policy.CardRestore, events.CardRestored
+		}
+		if err := tx.can(act, policy.Resource{ProjectID: p.ID, BoardID: c.BoardID}); err != nil {
+			return err
+		}
+		if err := tx.checkVersion(c.Version); err != nil {
+			return err
+		}
+		if c.ArchivedAt.Valid == archive {
+			return conflict("card already in that state", c.Version)
+		}
+		var at sql.NullInt64
+		if archive {
+			at = sql.NullInt64{Int64: tx.NowMs, Valid: true}
+		}
+		archivedRow, err := tx.Q.SetCardArchived(tx.ctx, sqlitegen.SetCardArchivedParams{ID: c.ID, WorkspaceID: actor.WorkspaceID, Version: c.Version, ArchivedAt: at, UpdatedAt: tx.NowMs})
+		updated, err := tx.versioned(c.ID, archivedRow, err)
+		if err != nil {
+			return err
+		}
+		if err := tx.emit(k, scope{WorkspaceID: p.WorkspaceID, ProjectID: p.ID, BoardID: c.BoardID, CardID: c.ID}, nil); err != nil {
+			return err
+		}
+		out, err = tx.cardResult(p, updated)
+		return err
+	})
+	return out, err
+}
+
+// ArchiveCard soft-deletes a card.
+func (s *Service) ArchiveCard(ctx context.Context, actor policy.Actor, cmd commands.ArchiveCard) (Card, error) {
+	if err := cmd.Validate(); err != nil {
+		return Card{}, validation(err)
+	}
+	return s.setArchived(ctx, actor, cmd.Meta, "ArchiveCard", cmd.CardKey, true)
+}
+
+// RestoreCard undoes ArchiveCard.
+func (s *Service) RestoreCard(ctx context.Context, actor policy.Actor, cmd commands.RestoreCard) (Card, error) {
+	if err := cmd.Validate(); err != nil {
+		return Card{}, validation(err)
+	}
+	return s.setArchived(ctx, actor, cmd.Meta, "RestoreCard", cmd.CardKey, false)
+}
+
+// GetCard returns a card and its comments for readers of the project.
+// Like SearchCards, it reads through the plain Querier with no
+// transaction: a card plus its labels, assignees and comments read
+// without a snapshot is accepted at this layer, and the hottest read
+// path should not take the SQLite write lock (BEGIN IMMEDIATE) for a
+// pure read.
+func (s *Service) GetCard(ctx context.Context, actor policy.Actor, key string) (Card, []Comment, error) {
+	q := s.st.Q()
+	now := s.clock.Now()
+	tx := &Tx{ctx: ctx, Q: q, Now: now, NowMs: clock.Millis(now), s: s, actor: actor}
+	c, p, err := tx.loadCard(key)
+	if err != nil {
+		return Card{}, nil, err
+	}
+	if err := tx.can(policy.ProjectRead, policy.Resource{ProjectID: p.ID, BoardID: c.BoardID}); err != nil {
+		return Card{}, nil, err
+	}
+	card, err := tx.cardResult(p, c)
+	if err != nil {
+		return Card{}, nil, err
+	}
+	rows, err := q.ListComments(ctx, sqlitegen.ListCommentsParams{CardID: c.ID, WorkspaceID: actor.WorkspaceID})
+	if err != nil {
+		return Card{}, nil, err
+	}
+	comments := make([]Comment, 0, len(rows))
+	for _, r := range rows {
+		comments = append(comments, commentDTO(r))
+	}
+	return card, comments, nil
+}
+
+// SearchCards runs the structured filter within a project.
+func (s *Service) SearchCards(ctx context.Context, actor policy.Actor, projectKey string, f filter.Filter) ([]Card, string, error) {
+	if err := f.Normalize(); err != nil {
+		return nil, "", validation(err)
+	}
+	// The cursor is the id of the last card of the previous page. It is a
+	// bound parameter, so a malformed one cannot inject anything, but it
+	// would silently return an empty page instead of saying what is wrong.
+	if f.Cursor != "" && !id.Valid(f.Cursor) {
+		return nil, "", validation(errors.New("filter: cursor is not a card id"))
+	}
+	q := s.st.Q()
+	p, err := q.GetProjectByKey(ctx, sqlitegen.GetProjectByKeyParams{WorkspaceID: actor.WorkspaceID, Key: projectKey})
+	if isNoRows(err) {
+		return nil, "", notFound("project")
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	// Resolve the board before asking policy: a board-restricted token
+	// resolved against an empty Resource.BoardID would be allowed to read
+	// any project in the workspace, which is the restriction it exists to
+	// impose.
+	b, err := q.GetBoardByProject(ctx, sqlitegen.GetBoardByProjectParams{ProjectID: p.ID, WorkspaceID: actor.WorkspaceID})
+	if err != nil {
+		return nil, "", err
+	}
+	if !policy.Can(actor, policy.ProjectRead, policy.Resource{ProjectID: p.ID, BoardID: b.ID}) {
+		return nil, "", forbidden()
+	}
+	rows, next, err := store.SearchCards(ctx, s.st.DB, s.st.Dialect, actor.WorkspaceID, p.ID, f)
+	if err != nil {
+		return nil, "", err
+	}
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.ID)
+	}
+	// One pair of queries for the page rather than a pair per card: the
+	// maximum page is 200 cards, which was 401 queries.
+	labels, assignees, err := store.CardTagIDs(ctx, s.st.DB, s.st.Dialect, ids)
+	if err != nil {
+		return nil, "", err
+	}
+	out := make([]Card, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, cardDTO(p.Key, r, labels[r.ID], assignees[r.ID]))
+	}
+	return out, next, nil
+}
