@@ -157,6 +157,22 @@ func TestBackupRefusedForMemoryAndPostgres(t *testing.T) {
 	}
 }
 
+func TestStatus(t *testing.T) {
+	st := openSQLite(t)
+	ctx := context.Background()
+	cur, latest, err := st.Status(ctx)
+	if err != nil || cur != 0 || latest < 1 {
+		t.Fatalf("before: %d/%d %v", cur, latest, err)
+	}
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	cur, latest, err = st.Status(ctx)
+	if err != nil || cur != latest {
+		t.Fatalf("after: %d/%d %v", cur, latest, err)
+	}
+}
+
 func TestBackupSucceedsAfterRemovingStaleBackup(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
