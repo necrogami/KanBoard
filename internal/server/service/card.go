@@ -220,8 +220,16 @@ func moveBounds(tx *Tx, to sqlitegen.BoardColumn, moving sqlitegen.Card, cmd com
 		switch {
 		case err != nil && !isNotFound(err):
 			return "", "", false, err
-		case err == nil && anchor.ID == moving.ID:
+		case err == nil && anchor.ID == moving.ID && moving.ColumnID == to.ID:
+			// Anchored to itself, in the column it already sits in: the
+			// request asks for nothing.
 			return "", "", false, errSameSpot
+		case err == nil && anchor.ID == moving.ID:
+			// Anchored to itself but asked for another column. The anchor
+			// cannot be honoured, so this is the missing-sibling case: the
+			// column change still applies, at the bottom, and the caller is
+			// told the placement was not the one it asked for.
+			soft = true
 		case err == nil && anchor.ColumnID == to.ID && !anchor.ArchivedAt.Valid:
 			if after {
 				upper, err := neighbourSkippingSelf(tx, to.ID, anchor.Position, selfPos, true)

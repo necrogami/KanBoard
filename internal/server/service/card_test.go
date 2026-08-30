@@ -225,6 +225,44 @@ func TestMoveCardMissingSiblingIsSoftConflict(t *testing.T) {
 	})
 }
 
+// TestSelfAnchoredMove covers both halves of a move whose anchor is the
+// moving card itself: within its own column the request asks for nothing
+// and is a no-op, but with a different target column the anchor cannot be
+// honoured, so the card lands at the bottom of the target and the move is
+// reported as a soft conflict (spec 4.5).
+func TestSelfAnchoredMove(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st *store.Store) {
+		h := newHarness(t, st)
+		ctx := context.Background()
+		_, b, cards := projectWithCards(t, h, "SELF", 2)
+
+		same, soft, err := h.svc.MoveCard(ctx, h.admin, commands.MoveCard{CardKey: cards[0].Key, ColumnID: b.Columns[0].ID, AfterKey: cards[0].Key})
+		if err != nil || soft {
+			t.Fatalf("same column: err=%v soft=%v", err, soft)
+		}
+		if same.ColumnID != cards[0].ColumnID || same.Version != cards[0].Version {
+			t.Fatalf("same column changed the card: %+v", same)
+		}
+
+		moved, soft, err := h.svc.MoveCard(ctx, h.admin, commands.MoveCard{CardKey: cards[0].Key, ColumnID: b.Columns[2].ID, AfterKey: cards[0].Key})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !soft {
+			t.Fatal("self anchor in another column is not a soft conflict")
+		}
+		if moved.ColumnID != b.Columns[2].ID {
+			t.Fatalf("column = %q, want %q", moved.ColumnID, b.Columns[2].ID)
+		}
+		if moved.Version != cards[0].Version+1 {
+			t.Fatalf("version = %d, want %d", moved.Version, cards[0].Version+1)
+		}
+		if moved.CompletedAt == nil {
+			t.Fatal("moving into a done column did not set completed_at")
+		}
+	})
+}
+
 func TestMoveEnqueuesRebalanceWhenKeysGrow(t *testing.T) {
 	storetest.Each(t, func(t *testing.T, st *store.Store) {
 		h := newHarness(t, st)
