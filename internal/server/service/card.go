@@ -4,12 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
+	"github.com/necrogami/kanboard/internal/core/clock"
 	"github.com/necrogami/kanboard/internal/core/commands"
 	"github.com/necrogami/kanboard/internal/core/events"
+	"github.com/necrogami/kanboard/internal/core/filter"
 	"github.com/necrogami/kanboard/internal/core/keys"
 	"github.com/necrogami/kanboard/internal/core/order"
 	"github.com/necrogami/kanboard/internal/core/policy"
+	"github.com/necrogami/kanboard/internal/server/store"
 	"github.com/necrogami/kanboard/internal/server/store/sqlitegen"
 )
 
@@ -315,4 +319,192 @@ func (s *Service) MoveCard(ctx context.Context, actor policy.Actor, cmd commands
 		return nil
 	})
 	return out, soft, err
+}
+
+// UpdateCard patches title, description and due date, emitting one
+// card.updated event per changed field.
+func (s *Service) UpdateCard(ctx context.Context, actor policy.Actor, cmd commands.UpdateCard) (Card, error) {
+	if err := cmd.Validate(); err != nil {
+		return Card{}, validation(err)
+	}
+	var out Card
+	err := s.run(ctx, actor, cmd.Meta, "UpdateCard", &out, func(tx *Tx) error {
+		c, p, err := tx.loadCard(cmd.CardKey)
+		if err != nil {
+			return err
+		}
+		if err := tx.can(policy.CardUpdate, policy.Resource{ProjectID: p.ID, BoardID: c.BoardID}); err != nil {
+			return err
+		}
+		if err := tx.checkVersion(c.Version); err != nil {
+			return err
+		}
+		sc := scope{WorkspaceID: p.WorkspaceID, ProjectID: p.ID, BoardID: c.BoardID, CardID: c.ID}
+		title, desc, due := c.Title, c.Description, c.DueDate
+		changed := false
+		if cmd.Title != nil && *cmd.Title != title {
+			if err := tx.emit(events.CardUpdated, sc, events.CardUpdatedPayload{Field: "title", Old: title, New: *cmd.Title}); err != nil {
+				return err
+			}
+			title, changed = *cmd.Title, true
+		}
+		if cmd.Description != nil && *cmd.Description != desc {
+			// Descriptions are up to 100 KB of user content; the event
+			// records that the field changed, not the text (spec 4.3
+			// payloads carry ids and names, and the log is forever).
+			if err := tx.emit(events.CardUpdated, sc, events.CardUpdatedPayload{Field: "description", Old: "", New: ""}); err != nil {
+				return err
+			}
+			desc, changed = *cmd.Description, true
+		}
+		if cmd.DueDate != nil || cmd.ClearDueDate {
+			newDue := nullMs(cmd.DueDate)
+			if newDue != due {
+				if err := tx.emit(events.CardUpdated, sc, events.CardUpdatedPayload{Field: "due_date", Old: msString(due), New: msString(newDue)}); err != nil {
+					return err
+				}
+				due, changed = newDue, true
+			}
+		}
+		if !changed {
+			// Nothing differs: no UPDATE, no version bump, no event.
+			out, err = tx.cardResult(p, c)
+			return err
+		}
+		updatedRow, err := tx.Q.UpdateCardFields(tx.ctx, sqlitegen.UpdateCardFieldsParams{ID: c.ID, Version: c.Version, Title: title, Description: desc, DueDate: due, UpdatedAt: tx.NowMs})
+		updated, err := tx.versioned(c.ID, updatedRow, err)
+		if err != nil {
+			return err
+		}
+		out, err = tx.cardResult(p, updated)
+		return err
+	})
+	return out, err
+}
+
+func msString(v sql.NullInt64) string {
+	if !v.Valid {
+		return ""
+	}
+	return clock.FromMillis(v.Int64).Format(time.RFC3339)
+}
+
+func (s *Service) setArchived(ctx context.Context, actor policy.Actor, meta commands.Meta, kind, key string, archive bool) (Card, error) {
+	var out Card
+	err := s.run(ctx, actor, meta, kind, &out, func(tx *Tx) error {
+		c, p, err := tx.loadCard(key)
+		if err != nil {
+			return err
+		}
+		act, k := policy.CardArchive, events.CardArchived
+		if !archive {
+			act, k = policy.CardRestore, events.CardRestored
+		}
+		if err := tx.can(act, policy.Resource{ProjectID: p.ID, BoardID: c.BoardID}); err != nil {
+			return err
+		}
+		if err := tx.checkVersion(c.Version); err != nil {
+			return err
+		}
+		if c.ArchivedAt.Valid == archive {
+			return conflict("card already in that state", c.Version)
+		}
+		var at sql.NullInt64
+		if archive {
+			at = sql.NullInt64{Int64: tx.NowMs, Valid: true}
+		}
+		archivedRow, err := tx.Q.SetCardArchived(tx.ctx, sqlitegen.SetCardArchivedParams{ID: c.ID, Version: c.Version, ArchivedAt: at, UpdatedAt: tx.NowMs})
+		updated, err := tx.versioned(c.ID, archivedRow, err)
+		if err != nil {
+			return err
+		}
+		if err := tx.emit(k, scope{WorkspaceID: p.WorkspaceID, ProjectID: p.ID, BoardID: c.BoardID, CardID: c.ID}, nil); err != nil {
+			return err
+		}
+		out, err = tx.cardResult(p, updated)
+		return err
+	})
+	return out, err
+}
+
+// ArchiveCard soft-deletes a card.
+func (s *Service) ArchiveCard(ctx context.Context, actor policy.Actor, cmd commands.ArchiveCard) (Card, error) {
+	if err := cmd.Validate(); err != nil {
+		return Card{}, validation(err)
+	}
+	return s.setArchived(ctx, actor, cmd.Meta, "ArchiveCard", cmd.CardKey, true)
+}
+
+// RestoreCard undoes ArchiveCard.
+func (s *Service) RestoreCard(ctx context.Context, actor policy.Actor, cmd commands.RestoreCard) (Card, error) {
+	if err := cmd.Validate(); err != nil {
+		return Card{}, validation(err)
+	}
+	return s.setArchived(ctx, actor, cmd.Meta, "RestoreCard", cmd.CardKey, false)
+}
+
+// GetCard returns a card and its comments for readers of the project.
+func (s *Service) GetCard(ctx context.Context, actor policy.Actor, key string) (Card, []Comment, error) {
+	var card Card
+	var comments []Comment
+	err := s.st.WithTx(ctx, func(q store.Querier) error {
+		now := s.clock.Now()
+		tx := &Tx{ctx: ctx, Q: q, Now: now, NowMs: clock.Millis(now), s: s, actor: actor}
+		c, p, err := tx.loadCard(key)
+		if err != nil {
+			return err
+		}
+		if err := tx.can(policy.ProjectRead, policy.Resource{ProjectID: p.ID, BoardID: c.BoardID}); err != nil {
+			return err
+		}
+		card, err = tx.cardResult(p, c)
+		if err != nil {
+			return err
+		}
+		rows, err := q.ListComments(ctx, c.ID)
+		if err != nil {
+			return err
+		}
+		comments = make([]Comment, 0, len(rows))
+		for _, r := range rows {
+			comments = append(comments, commentDTO(r))
+		}
+		return nil
+	})
+	return card, comments, err
+}
+
+// SearchCards runs the structured filter within a project.
+func (s *Service) SearchCards(ctx context.Context, actor policy.Actor, projectKey string, f filter.Filter) ([]Card, string, error) {
+	if err := f.Normalize(); err != nil {
+		return nil, "", validation(err)
+	}
+	q := s.st.Q()
+	p, err := q.GetProjectByKey(ctx, sqlitegen.GetProjectByKeyParams{WorkspaceID: actor.WorkspaceID, Key: projectKey})
+	if isNoRows(err) {
+		return nil, "", notFound("project")
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	if !policy.Can(actor, policy.ProjectRead, policy.Resource{ProjectID: p.ID}) {
+		return nil, "", forbidden()
+	}
+	rows, next, err := store.SearchCards(ctx, s.st.DB, s.st.Dialect, p.ID, f)
+	if err != nil {
+		return nil, "", err
+	}
+	out := make([]Card, 0, len(rows))
+	for _, r := range rows {
+		labels, err := q.ListCardLabelIDs(ctx, r.ID)
+		if err != nil {
+			return nil, "", err
+		}
+		assignees, err := q.ListCardAssigneeIDs(ctx, r.ID)
+		if err != nil {
+			return nil, "", err
+		}
+		out = append(out, cardDTO(p.Key, r, labels, assignees))
+	}
+	return out, next, nil
 }
