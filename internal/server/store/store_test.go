@@ -415,14 +415,14 @@ func TestJobLifecycle(t *testing.T) {
 			}
 		}
 
-		if err := q.CompleteJob(ctx, sqlitegen.CompleteJobParams{CompletedAt: sql.NullInt64{Int64: 5, Valid: true}, ID: "j1"}); err != nil {
+		if err := q.CompleteJob(ctx, sqlitegen.CompleteJobParams{CompletedAt: sql.NullInt64{Int64: 5, Valid: true}, ID: "j1", Owner: sql.NullString{String: "w1", Valid: true}}); err != nil {
 			t.Fatal(err)
 		}
 		if got, err := q.GetJob(ctx, "j1"); err != nil || got.State != "done" {
 			t.Fatalf("GetJob j1 = %+v, %v", got, err)
 		}
 
-		if err := q.RetryJob(ctx, sqlitegen.RetryJobParams{RunAt: 200, LastError: sql.NullString{String: "boom", Valid: true}, ID: "j2"}); err != nil {
+		if err := q.RetryJob(ctx, sqlitegen.RetryJobParams{RunAt: 200, LastError: sql.NullString{String: "boom", Valid: true}, ID: "j2", Owner: sql.NullString{String: "w1", Valid: true}}); err != nil {
 			t.Fatal(err)
 		}
 		if got, err := q.GetJob(ctx, "j2"); err != nil || got.State != "queued" || got.RunAt != 200 {
@@ -439,7 +439,7 @@ func TestJobLifecycle(t *testing.T) {
 			t.Fatalf("LeaseJobs after retry = %d, %v", len(relaunched), err)
 		}
 
-		if err := q.DeadJob(ctx, sqlitegen.DeadJobParams{CompletedAt: sql.NullInt64{Int64: 9, Valid: true}, LastError: sql.NullString{String: "fatal", Valid: true}, ID: "j3"}); err != nil {
+		if err := q.DeadJob(ctx, sqlitegen.DeadJobParams{CompletedAt: sql.NullInt64{Int64: 9, Valid: true}, LastError: sql.NullString{String: "fatal", Valid: true}, ID: "j3", Owner: sql.NullString{String: "w1", Valid: true}}); err != nil {
 			t.Fatal(err)
 		}
 		if got, err := q.GetJob(ctx, "j3"); err != nil || got.State != "dead" {

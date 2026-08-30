@@ -169,7 +169,7 @@ func (r *Runner) RunOnce(ctx context.Context) (int, error) {
 	// so sqlc types the parameters compared with or assigned to them as
 	// sql.NullString / sql.NullInt64.
 	rows, err := r.st.Q().LeaseJobs(ctx, sqlitegen.LeaseJobsParams{
-		Owner: sql.NullString{String: r.worker, Valid: true}, LeaseUntil: nullMs(now.Add(r.lease)),
+		Owner: r.owner(), LeaseUntil: nullMs(now.Add(r.lease)),
 		NowQueued: clock.Millis(now), NowLeased: nullMs(now), Batch: r.batch,
 	})
 	if err != nil {
@@ -207,7 +207,7 @@ func (r *Runner) runOne(ctx context.Context, row sqlitegen.Job) {
 	err = r.safeCall(ctx, h, job)
 	now := nullMs(r.clock.Now())
 	if err == nil {
-		if e := r.st.Q().CompleteJob(ctx, sqlitegen.CompleteJobParams{ID: row.ID, CompletedAt: now}); e != nil {
+		if e := r.st.Q().CompleteJob(ctx, sqlitegen.CompleteJobParams{ID: row.ID, CompletedAt: now, Owner: r.owner()}); e != nil {
 			r.log.Error("jobs: complete", "id", row.ID, "err", e)
 		}
 		return
@@ -217,7 +217,7 @@ func (r *Runner) runOne(ctx context.Context, row sqlitegen.Job) {
 		return
 	}
 	next := r.clock.Now().Add(Backoff(row.Attempts, r.jitter()))
-	if e := r.st.Q().RetryJob(ctx, sqlitegen.RetryJobParams{ID: row.ID, RunAt: clock.Millis(next), LastError: sql.NullString{String: err.Error(), Valid: true}}); e != nil {
+	if e := r.st.Q().RetryJob(ctx, sqlitegen.RetryJobParams{ID: row.ID, RunAt: clock.Millis(next), LastError: sql.NullString{String: err.Error(), Valid: true}, Owner: r.owner()}); e != nil {
 		r.log.Error("jobs: retry", "id", row.ID, "err", e)
 	}
 	r.log.Warn("jobs: failed, will retry", "id", row.ID, "kind", row.Kind, "attempt", row.Attempts, "err", err)
@@ -225,10 +225,17 @@ func (r *Runner) runOne(ctx context.Context, row sqlitegen.Job) {
 
 func (r *Runner) dead(ctx context.Context, jid string, cause error) {
 	now := nullMs(r.clock.Now())
-	if e := r.st.Q().DeadJob(ctx, sqlitegen.DeadJobParams{ID: jid, CompletedAt: now, LastError: sql.NullString{String: cause.Error(), Valid: true}}); e != nil {
+	if e := r.st.Q().DeadJob(ctx, sqlitegen.DeadJobParams{ID: jid, CompletedAt: now, LastError: sql.NullString{String: cause.Error(), Valid: true}, Owner: r.owner()}); e != nil {
 		r.log.Error("jobs: dead", "id", jid, "err", e)
 	}
 	r.log.Error("jobs: dead letter", "id", jid, "err", cause)
+}
+
+// owner is this runner's lease-owner value, as the release queries expect
+// it: lease_owner is nullable, so sqlc types the comparison parameter as
+// sql.NullString.
+func (r *Runner) owner() sql.NullString {
+	return sql.NullString{String: r.worker, Valid: true}
 }
 
 func nullMs(t time.Time) sql.NullInt64 {

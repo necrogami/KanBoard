@@ -11,6 +11,10 @@ import (
 type Querier interface {
 	AddCardAssignee(ctx context.Context, arg AddCardAssigneeParams) error
 	AddCardLabel(ctx context.Context, arg AddCardLabelParams) error
+	// CompleteJob releases the lease only while this owner still holds it. A
+	// runner whose lease expired, and whose job another runner has already
+	// reclaimed, must not clobber the new owner's outcome: the update matches
+	// no row instead. RetryJob and DeadJob carry the same guard.
 	CompleteJob(ctx context.Context, arg CompleteJobParams) error
 	CountCardsInColumn(ctx context.Context, columnID string) (int64, error)
 	CountWorkspaces(ctx context.Context) (int64, error)
@@ -22,6 +26,7 @@ type Querier interface {
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (AppUser, error)
 	CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams) (Workspace, error)
+	// DeadJob is guarded by the lease owner; see CompleteJob.
 	DeadJob(ctx context.Context, arg DeadJobParams) error
 	DeleteReceiptsBefore(ctx context.Context, before int64) (int64, error)
 	FirstPositionInColumn(ctx context.Context, columnID string) (string, error)
@@ -68,6 +73,7 @@ type Querier interface {
 	PrevPositionBefore(ctx context.Context, arg PrevPositionBeforeParams) (string, error)
 	RemoveCardAssignee(ctx context.Context, arg RemoveCardAssigneeParams) error
 	RemoveCardLabel(ctx context.Context, arg RemoveCardLabelParams) error
+	// RetryJob is guarded by the lease owner; see CompleteJob.
 	RetryJob(ctx context.Context, arg RetryJobParams) error
 	SetCardArchived(ctx context.Context, arg SetCardArchivedParams) (Card, error)
 	TouchCard(ctx context.Context, arg TouchCardParams) (Card, error)

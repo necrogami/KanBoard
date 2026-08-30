@@ -192,3 +192,49 @@ func TestWakeRunsImmediately(t *testing.T) {
 		t.Fatal("job did not run after Wake")
 	}
 }
+
+// TestStaleLeaseOwnerCannotClobberReclaimedJob drives two runners over one
+// job: the first overruns its lease, the second reclaims the job and fails
+// it into a retry, and the first then reports its own outcome late. The
+// late write must not land, because the lease no longer belongs to it.
+func TestStaleLeaseOwnerCannotClobberReclaimedJob(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st *store.Store) {
+		ctx := context.Background()
+		fake := clock.NewFake(time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC))
+		zero := jobs.WithJitter(func() float64 { return 0 })
+		slow := jobs.New(st, jobs.WithClock(fake), jobs.WithLease(time.Minute), zero)
+		fast := jobs.New(st, jobs.WithClock(fake), jobs.WithLease(time.Minute), zero)
+		fast.Register("test.slow", func(context.Context, jobs.Job) error { return errors.New("reclaimed and failed") })
+		slow.Register("test.slow", func(ctx context.Context, _ jobs.Job) error {
+			// While this handler runs, its lease expires and the second
+			// runner reclaims the job and schedules a retry.
+			fake.Advance(2 * time.Minute)
+			if n, err := fast.RunOnce(ctx); err != nil || n != 1 {
+				t.Errorf("reclaim RunOnce = %d, %v", n, err)
+			}
+			return nil
+		})
+
+		jid, err := jobs.Enqueue(ctx, st.Q(), fake.Now(), jobs.Spec{Kind: "test.slow", Payload: "p"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, err := slow.RunOnce(ctx); err != nil || n != 1 {
+			t.Fatalf("first RunOnce = %d, %v", n, err)
+		}
+
+		got, err := st.Q().GetJob(ctx, jid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.State != "queued" {
+			t.Fatalf("state = %q, want queued (the stale owner completed a job it no longer held)", got.State)
+		}
+		if got.LastError.String != "reclaimed and failed" {
+			t.Fatalf("last_error = %q", got.LastError.String)
+		}
+		if got.CompletedAt.Valid {
+			t.Fatalf("completed_at = %v, want null", got.CompletedAt)
+		}
+	})
+}

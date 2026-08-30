@@ -13,13 +13,22 @@ WHERE id IN (
 RETURNING *;
 
 -- name: CompleteJob :exec
-UPDATE job SET state = 'done', completed_at = @completed_at, lease_owner = NULL, lease_expires_at = NULL WHERE id = @id;
+-- CompleteJob releases the lease only while this owner still holds it. A
+-- runner whose lease expired, and whose job another runner has already
+-- reclaimed, must not clobber the new owner's outcome: the update matches
+-- no row instead. RetryJob and DeadJob carry the same guard.
+UPDATE job SET state = 'done', completed_at = @completed_at, lease_owner = NULL, lease_expires_at = NULL
+WHERE id = @id AND state = 'leased' AND lease_owner = @owner;
 
 -- name: RetryJob :exec
-UPDATE job SET state = 'queued', run_at = @run_at, last_error = @last_error, lease_owner = NULL, lease_expires_at = NULL WHERE id = @id;
+-- RetryJob is guarded by the lease owner; see CompleteJob.
+UPDATE job SET state = 'queued', run_at = @run_at, last_error = @last_error, lease_owner = NULL, lease_expires_at = NULL
+WHERE id = @id AND state = 'leased' AND lease_owner = @owner;
 
 -- name: DeadJob :exec
-UPDATE job SET state = 'dead', completed_at = @completed_at, last_error = @last_error, lease_owner = NULL, lease_expires_at = NULL WHERE id = @id;
+-- DeadJob is guarded by the lease owner; see CompleteJob.
+UPDATE job SET state = 'dead', completed_at = @completed_at, last_error = @last_error, lease_owner = NULL, lease_expires_at = NULL
+WHERE id = @id AND state = 'leased' AND lease_owner = @owner;
 
 -- name: GetJob :one
 SELECT * FROM job WHERE id = @id;

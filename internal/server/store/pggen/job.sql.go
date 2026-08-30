@@ -11,31 +11,45 @@ import (
 )
 
 const completeJob = `-- name: CompleteJob :exec
-UPDATE job SET state = 'done', completed_at = $1, lease_owner = NULL, lease_expires_at = NULL WHERE id = $2
+UPDATE job SET state = 'done', completed_at = $1, lease_owner = NULL, lease_expires_at = NULL
+WHERE id = $2 AND state = 'leased' AND lease_owner = $3
 `
 
 type CompleteJobParams struct {
 	CompletedAt sql.NullInt64
 	ID          string
+	Owner       sql.NullString
 }
 
+// CompleteJob releases the lease only while this owner still holds it. A
+// runner whose lease expired, and whose job another runner has already
+// reclaimed, must not clobber the new owner's outcome: the update matches
+// no row instead. RetryJob and DeadJob carry the same guard.
 func (q *Queries) CompleteJob(ctx context.Context, arg CompleteJobParams) error {
-	_, err := q.db.ExecContext(ctx, completeJob, arg.CompletedAt, arg.ID)
+	_, err := q.db.ExecContext(ctx, completeJob, arg.CompletedAt, arg.ID, arg.Owner)
 	return err
 }
 
 const deadJob = `-- name: DeadJob :exec
-UPDATE job SET state = 'dead', completed_at = $1, last_error = $2, lease_owner = NULL, lease_expires_at = NULL WHERE id = $3
+UPDATE job SET state = 'dead', completed_at = $1, last_error = $2, lease_owner = NULL, lease_expires_at = NULL
+WHERE id = $3 AND state = 'leased' AND lease_owner = $4
 `
 
 type DeadJobParams struct {
 	CompletedAt sql.NullInt64
 	LastError   sql.NullString
 	ID          string
+	Owner       sql.NullString
 }
 
+// DeadJob is guarded by the lease owner; see CompleteJob.
 func (q *Queries) DeadJob(ctx context.Context, arg DeadJobParams) error {
-	_, err := q.db.ExecContext(ctx, deadJob, arg.CompletedAt, arg.LastError, arg.ID)
+	_, err := q.db.ExecContext(ctx, deadJob,
+		arg.CompletedAt,
+		arg.LastError,
+		arg.ID,
+		arg.Owner,
+	)
 	return err
 }
 
@@ -201,16 +215,24 @@ func (q *Queries) ListJobsByState(ctx context.Context, arg ListJobsByStateParams
 }
 
 const retryJob = `-- name: RetryJob :exec
-UPDATE job SET state = 'queued', run_at = $1, last_error = $2, lease_owner = NULL, lease_expires_at = NULL WHERE id = $3
+UPDATE job SET state = 'queued', run_at = $1, last_error = $2, lease_owner = NULL, lease_expires_at = NULL
+WHERE id = $3 AND state = 'leased' AND lease_owner = $4
 `
 
 type RetryJobParams struct {
 	RunAt     int64
 	LastError sql.NullString
 	ID        string
+	Owner     sql.NullString
 }
 
+// RetryJob is guarded by the lease owner; see CompleteJob.
 func (q *Queries) RetryJob(ctx context.Context, arg RetryJobParams) error {
-	_, err := q.db.ExecContext(ctx, retryJob, arg.RunAt, arg.LastError, arg.ID)
+	_, err := q.db.ExecContext(ctx, retryJob,
+		arg.RunAt,
+		arg.LastError,
+		arg.ID,
+		arg.Owner,
+	)
 	return err
 }
