@@ -49,8 +49,12 @@ func SearchCards(ctx context.Context, db sqlitegen.DBTX, d Dialect, workspaceID,
 		where = append(where, "updated_at > "+ph(clock.Millis(*f.UpdatedAfter)))
 	}
 	if f.Text != "" {
-		// lower() on both sides: SQLite's LIKE is case-insensitive for ASCII
-		// only, Postgres's is case-sensitive; this makes both behave alike.
+		// lower() on both sides so a LIKE behaves the same way on either
+		// engine for ASCII text: SQLite's LIKE is already case-insensitive
+		// for ASCII, Postgres's is case-sensitive. The engines still differ
+		// beyond ASCII, where SQLite's lower() does nothing and Postgres's
+		// is locale-aware; real text search (FTS5 and tsvector) arrives in
+		// 0.4 and settles it.
 		pat := "%" + escapeLike(strings.ToLower(f.Text)) + "%"
 		where = append(where, "(lower(title) LIKE "+ph(pat)+" ESCAPE '\\' OR lower(description) LIKE "+ph(pat)+" ESCAPE '\\')")
 	}
@@ -60,6 +64,11 @@ func SearchCards(ctx context.Context, db sqlitegen.DBTX, d Dialect, workspaceID,
 	limit := f.Limit
 	if limit <= 0 {
 		limit = filter.DefaultLimit
+	}
+	// Callers are expected to Normalize first, but this function is
+	// exported and the page size bounds the memory one query can take.
+	if limit > filter.MaxLimit {
+		limit = filter.MaxLimit
 	}
 	query := "SELECT " + cardColumns + " FROM card WHERE " + strings.Join(where, " AND ") + " ORDER BY id LIMIT " + ph(limit+1)
 

@@ -9,10 +9,58 @@ import (
 	"github.com/necrogami/kanboard/internal/core/clock"
 	"github.com/necrogami/kanboard/internal/core/filter"
 	"github.com/necrogami/kanboard/internal/core/id"
+	"github.com/necrogami/kanboard/internal/core/order"
 	"github.com/necrogami/kanboard/internal/server/store"
 	"github.com/necrogami/kanboard/internal/server/store/sqlitegen"
 	"github.com/necrogami/kanboard/internal/server/store/storetest"
 )
+
+// TestSearchCardsClampsLimit: SearchCards is exported and callers other
+// than the service (plan 7's exporter, for one) will reach for it, so
+// the page size bound cannot rely on the caller having normalized.
+func TestSearchCardsClampsLimit(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st *store.Store) {
+		ctx := context.Background()
+		q := st.Q()
+		ws, err := q.CreateWorkspace(ctx, sqlitegen.CreateWorkspaceParams{ID: id.New(), Name: "W", Slug: "lim", CreatedAt: 1, UpdatedAt: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		u, err := q.CreateUser(ctx, sqlitegen.CreateUserParams{ID: id.New(), WorkspaceID: ws.ID, Name: "A", Kind: "human", Locale: "en", CreatedAt: 1, UpdatedAt: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := q.CreateProject(ctx, sqlitegen.CreateProjectParams{ID: id.New(), WorkspaceID: ws.ID, Key: "LIM", Name: "L", CreatedAt: 1, UpdatedAt: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := q.CreateBoard(ctx, sqlitegen.CreateBoardParams{ID: id.New(), WorkspaceID: ws.ID, ProjectID: p.ID, Name: "B", Position: "V", CreatedAt: 1, UpdatedAt: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, err := q.CreateColumn(ctx, sqlitegen.CreateColumnParams{ID: id.New(), WorkspaceID: ws.ID, BoardID: b.ID, Name: "A", Position: "V", Category: "todo", CreatedAt: 1, UpdatedAt: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		positions := order.Rebalance(filter.MaxLimit + 1)
+		for i, pos := range positions {
+			if _, err := q.CreateCard(ctx, sqlitegen.CreateCardParams{ID: id.New(), WorkspaceID: ws.ID, ProjectID: p.ID, BoardID: b.ID, ColumnID: c.ID, Number: int64(i + 1), Title: "t", Description: "", Position: pos, CreatedBy: u.ID, CreatedAt: 1, UpdatedAt: 1}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// Deliberately not normalized: the store must clamp for itself.
+		rows, next, err := store.SearchCards(ctx, st.DB, st.Dialect, ws.ID, p.ID, filter.Filter{Limit: 10000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != filter.MaxLimit {
+			t.Fatalf("rows = %d, want the maximum page of %d", len(rows), filter.MaxLimit)
+		}
+		if next == "" {
+			t.Fatal("no cursor for the remaining card")
+		}
+	})
+}
 
 func TestSearchCards(t *testing.T) {
 	storetest.Each(t, func(t *testing.T, st *store.Store) {
