@@ -1,9 +1,15 @@
 -- +goose Up
 -- Conventions: ids are UUIDv7 text; timestamps are unix milliseconds; no
--- booleans (0/1 integers). Positions and ids are compared bytewise: the
--- Postgres copy of this file declares a C collation on them (added by the
--- generation step in Task 9 Step 4). goose_db_version plays the role of
--- the spec's schema_version table.
+-- booleans (0/1 integers). goose_db_version plays the role of the spec's
+-- schema_version table.
+--
+-- Collation: SQLite compares text bytewise (BINARY), so every text column
+-- this schema orders or groups by declares COLLATE "C" here, and the two
+-- engines return the same order whatever the database collation is. That
+-- covers the primary keys, board.position, board_column.position,
+-- card.position, card.column_id (ListCardsByBoard groups by it) and
+-- label.name (ListLabels orders by it). Ordering label names the way a
+-- reader expects is a presentation concern, not a storage one.
 CREATE TABLE workspace (
     id TEXT PRIMARY KEY COLLATE "C",
     name TEXT NOT NULL,
@@ -102,7 +108,7 @@ CREATE TABLE card (
     workspace_id TEXT NOT NULL REFERENCES workspace(id),
     project_id TEXT NOT NULL REFERENCES project(id),
     board_id TEXT NOT NULL REFERENCES board(id),
-    column_id TEXT NOT NULL REFERENCES board_column(id),
+    column_id TEXT NOT NULL COLLATE "C" REFERENCES board_column(id),
     number BIGINT NOT NULL,
     title TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
@@ -131,7 +137,7 @@ CREATE TABLE label (
     id TEXT PRIMARY KEY COLLATE "C",
     workspace_id TEXT NOT NULL REFERENCES workspace(id),
     project_id TEXT NOT NULL REFERENCES project(id),
-    name TEXT NOT NULL,
+    name TEXT NOT NULL COLLATE "C",
     color TEXT NOT NULL,
     kind TEXT NOT NULL DEFAULT 'label',
     created_at BIGINT NOT NULL,

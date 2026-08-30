@@ -105,6 +105,40 @@ func TestCardPositions(t *testing.T) {
 	})
 }
 
+// TestTextOrderingIsBytewiseOnBothEngines pins the ordering of the text
+// columns a query sorts by. SQLite compares BINARY; Postgres compares
+// with the database collation unless the column declares one, and a
+// default en_US.utf8 database sorts "apple" before "Banana" where a
+// bytewise comparison sorts "Banana" first. The two engines must agree,
+// so the ordered columns carry COLLATE "C". Human-friendly label
+// ordering is a presentation concern, not a storage one.
+func TestTextOrderingIsBytewiseOnBothEngines(t *testing.T) {
+	storetest.Each(t, func(t *testing.T, st *store.Store) {
+		ctx := context.Background()
+		q := st.Q()
+		ws, err := q.CreateWorkspace(ctx, sqlitegen.CreateWorkspaceParams{ID: id.New(), Name: "W", Slug: "coll", CreatedAt: 1, UpdatedAt: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := q.CreateProject(ctx, sqlitegen.CreateProjectParams{ID: id.New(), WorkspaceID: ws.ID, Key: "COLL", Name: "C", CreatedAt: 1, UpdatedAt: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"apple", "Banana"} {
+			if _, err := q.CreateLabel(ctx, sqlitegen.CreateLabelParams{ID: id.New(), WorkspaceID: ws.ID, ProjectID: p.ID, Name: name, Color: "#FFFFFF", CreatedAt: 1, UpdatedAt: 1}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		ls, err := q.ListLabels(ctx, p.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ls) != 2 || ls[0].Name != "Banana" || ls[1].Name != "apple" {
+			t.Fatalf("ListLabels order = %q, %q; want Banana, apple", ls[0].Name, ls[len(ls)-1].Name)
+		}
+	})
+}
+
 // TestEveryQueryRunsOnBothEngines exercises the queries no other test
 // reaches, so a dialect problem surfaces here rather than in plan 3.
 func TestEveryQueryRunsOnBothEngines(t *testing.T) {
