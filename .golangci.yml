@@ -14,6 +14,20 @@ linters:
           deny:
             - pkg: "github.com/necrogami/kanboard/internal/server"
               desc: "core and clients never import the server"
+        # ui is an allowlist, not a denylist: spec 3 says ui imports
+        # internal/client/viewmodel and internal/i18n only. Everything
+        # outside the standard library has to be named here, so adding a
+        # dependency to the UI is a deliberate edit rather than an accident.
+        ui-allowlist:
+          files: ["**/ui/**"]
+          allow:
+            - "$gostd"
+            - "github.com/necrogami/kanboard/ui"
+            - "github.com/necrogami/kanboard/internal/client/viewmodel"
+            - "github.com/necrogami/kanboard/internal/i18n"
+          deny:
+            - pkg: "github.com/necrogami/kanboard/internal"
+              desc: "ui imports internal/client/viewmodel and internal/i18n only"
         adapters-no-store:
           files: ["**/internal/server/api/**", "**/internal/server/mcp/**", "**/internal/server/web/**"]
           deny:
