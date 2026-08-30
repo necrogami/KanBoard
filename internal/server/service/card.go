@@ -153,6 +153,9 @@ func (t *Tx) versioned(id string, row sqlitegen.Card, err error) (sqlitegen.Card
 		return row, err
 	}
 	cur, gerr := t.Q.GetCard(t.ctx, id)
+	if isNoRows(gerr) {
+		return sqlitegen.Card{}, notFound("card")
+	}
 	if gerr != nil {
 		return sqlitegen.Card{}, gerr
 	}
@@ -279,7 +282,6 @@ func (s *Service) MoveCard(ctx context.Context, actor policy.Actor, cmd commands
 		if err != nil {
 			return err
 		}
-		soft = softHere
 		pos, err := order.Between(lower, upper)
 		if err != nil {
 			return err
@@ -306,7 +308,11 @@ func (s *Service) MoveCard(ctx context.Context, actor policy.Actor, cmd commands
 			return err
 		}
 		out, err = tx.cardResult(p, moved)
-		return err
+		if err != nil {
+			return err
+		}
+		soft = softHere
+		return nil
 	})
 	return out, soft, err
 }

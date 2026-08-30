@@ -2,8 +2,10 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/necrogami/kanboard/internal/core/commands"
 	"github.com/necrogami/kanboard/internal/core/events"
@@ -13,6 +15,19 @@ import (
 	"github.com/necrogami/kanboard/internal/server/store/sqlitegen"
 	"github.com/necrogami/kanboard/internal/server/store/storetest"
 )
+
+// recvEvent waits up to 2s for an event on c so a stuck bus fails the
+// test instead of hanging it.
+func recvEvent(t *testing.T, c <-chan events.Event) events.Event {
+	t.Helper()
+	select {
+	case ev := <-c:
+		return ev
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for event")
+		return events.Event{}
+	}
+}
 
 func projectWithCards(t *testing.T, h *harness, key string, n int) (service.Project, service.Board, []service.Card) {
 	t.Helper()
@@ -60,6 +75,9 @@ func TestCreateCardInNamedColumnAndForbidden(t *testing.T) {
 		h := newHarness(t, st)
 		ctx := context.Background()
 		p, b, _ := projectWithCards(t, h, "COL", 0)
+		sub := h.bus.Subscribe(h.ws.ID)
+		defer sub.Close()
+
 		c, err := h.svc.CreateCard(ctx, h.admin, commands.CreateCard{ProjectID: p.ID, ColumnID: b.Columns[2].ID, Title: "done already"})
 		if err != nil {
 			t.Fatal(err)
@@ -67,6 +85,18 @@ func TestCreateCardInNamedColumnAndForbidden(t *testing.T) {
 		if c.ColumnID != b.Columns[2].ID {
 			t.Fatal("column ignored")
 		}
+		ev := recvEvent(t, sub.C)
+		if ev.Kind != events.CardCreated {
+			t.Fatalf("event = %s", ev.Kind)
+		}
+		var cp events.CardCreatedPayload
+		if err := json.Unmarshal([]byte(ev.Payload), &cp); err != nil {
+			t.Fatal(err)
+		}
+		if cp.Number != c.Number || cp.Title != c.Title || cp.ColumnID != b.Columns[2].ID || cp.ColumnName != b.Columns[2].Name {
+			t.Fatalf("payload = %+v", cp)
+		}
+
 		viewer := policy.Actor{UserID: "v", WorkspaceID: h.ws.ID, WorkspaceRole: policy.WorkspaceMember, ProjectRoles: map[string]policy.ProjectRole{p.ID: policy.ProjectViewer}}
 		_, err = h.svc.CreateCard(ctx, viewer, commands.CreateCard{ProjectID: p.ID, Title: "nope"})
 		code(t, err, service.CodeForbidden)
@@ -92,9 +122,22 @@ func TestMoveCardBetweenAndAcrossColumns(t *testing.T) {
 		if moved.Version != cards[2].Version+1 {
 			t.Fatalf("version = %d", moved.Version)
 		}
-		ev := <-sub.C
+		ev := recvEvent(t, sub.C)
 		if ev.Kind != events.CardMoved {
 			t.Fatalf("event = %s", ev.Kind)
+		}
+		var mp events.CardMovedPayload
+		if err := json.Unmarshal([]byte(ev.Payload), &mp); err != nil {
+			t.Fatal(err)
+		}
+		if mp.FromColumnID != b.Columns[0].ID || mp.ToColumnID != b.Columns[0].ID {
+			t.Fatalf("column ids = %+v", mp)
+		}
+		if mp.FromName != b.Columns[0].Name || mp.ToName != b.Columns[0].Name {
+			t.Fatalf("column names = %+v", mp)
+		}
+		if mp.FromCategory != b.Columns[0].Category || mp.ToCategory != b.Columns[0].Category {
+			t.Fatalf("column categories = %+v", mp)
 		}
 
 		// Move card 1 to the top of Done: completed_at is set, version +1 only.
