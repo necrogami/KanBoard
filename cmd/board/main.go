@@ -79,7 +79,11 @@ func migrate(args []string, stdout, stderr io.Writer) int {
 			_, _ = fmt.Fprintln(stderr, "board:", err)
 			return 1
 		}
-		cur, latest, _ := st.Status(ctx)
+		cur, latest, err := st.Status(ctx)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "board:", err)
+			return 1
+		}
 		_, _ = fmt.Fprintf(stdout, "migrated to %d/%d (%s)\n", cur, latest, st.Dialect)
 		return 0
 	case "status":
